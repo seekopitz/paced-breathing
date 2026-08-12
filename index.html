@@ -39,18 +39,25 @@
   /* ---------- header ---------- */
   header{
     display:flex;justify-content:space-between;align-items:baseline;
-    padding:22px 24px 0;
+    padding:20px 20px 0;
     font-size:10px;letter-spacing:.22em;text-transform:uppercase;
     color:var(--mist-dim);font-weight:300;
   }
   #stats{font-variant-numeric:tabular-nums;letter-spacing:.14em}
 
   /* ---------- stage ---------- */
-  main{flex:1;min-height:0;display:grid;place-items:center;padding:8px 20px}
+  main{
+    flex:1;min-height:0;
+    display:grid;place-items:center;
+    padding:8px 16px;
+    container-type:size;
+  }
   #stage{
     position:relative;
-    height:min(74vw,320px);max-height:100%;width:auto;aspect-ratio:1;
+    width:min(88cqmin,320px);
+    aspect-ratio:1;
     display:grid;place-items:center;
+    container-type:size;
   }
   #bloom,#orb{
     position:absolute;inset:0;margin:auto;
@@ -75,38 +82,41 @@
   #dial .seg{fill:none;stroke-linecap:round;transition:opacity .5s ease,stroke-width .5s ease}
   #dot{transition:opacity .6s ease}
 
-  #center{position:relative;text-align:center;pointer-events:none}
+  #center{position:relative;text-align:center;pointer-events:none;padding:0 8%;max-width:100%}
   #phase{
     font-family:var(--display);font-weight:300;
-    font-size:clamp(26px,7.4vw,34px);
+    font-size:clamp(20px,11cqmin,34px);
     letter-spacing:.02em;line-height:1.1;
     color:rgba(233,239,255,.92);
     text-shadow:0 0 26px rgba(var(--c),.35);
+    white-space:nowrap;
   }
   #count{
-    margin-top:10px;font-size:11px;font-weight:300;
-    letter-spacing:.26em;color:rgba(174,185,216,.42);
+    margin-top:clamp(4px,2cqmin,10px);
+    font-size:clamp(9px,3.4cqmin,11px);font-weight:300;
+    letter-spacing:.22em;color:rgba(174,185,216,.42);
     font-variant-numeric:tabular-nums;
+    white-space:nowrap;
   }
 
   /* ---------- controls ---------- */
   #controls{
-    padding:0 20px calc(24px + env(safe-area-inset-bottom));
+    padding:0 16px calc(20px + env(safe-area-inset-bottom));
     width:100%;max-width:520px;margin:0 auto;
-    display:flex;flex-direction:column;gap:20px;
+    display:flex;flex-direction:column;gap:18px;
     transition:opacity 1.6s ease;
   }
   #controls.dim{opacity:.14}
   #controls:hover,#controls:focus-within{opacity:1;transition:opacity .35s ease}
 
-  #presets{display:flex;flex-wrap:wrap;gap:7px;justify-content:center}
+  #presets{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
   .chip{
-    padding:7px 12px;border:1px solid var(--line);border-radius:999px;
+    padding:7px 11px;border:1px solid var(--line);border-radius:999px;
     font-size:10px;letter-spacing:.16em;text-transform:uppercase;font-weight:300;
     color:var(--mist-dim);transition:color .3s,border-color .3s,background .3s;
     white-space:nowrap;
   }
-  .chip .p{margin-left:7px;opacity:.62;letter-spacing:.08em}
+  .chip .p{margin-left:6px;opacity:.62;letter-spacing:.08em}
   .chip:hover{color:var(--mist);border-color:rgba(174,185,216,.3)}
   .chip[aria-pressed="true"]{
     color:rgba(233,239,255,.95);
@@ -114,37 +124,49 @@
     background:rgba(var(--c),.07);
   }
 
-  #steppers{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  #steppers{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:6px;
+  }
   .step{
-    border:1px solid var(--line);border-radius:12px;padding:9px 4px 7px;
-    display:flex;flex-direction:column;align-items:center;gap:4px;
+    border:1px solid var(--line);border-radius:12px;
+    padding:8px 2px 8px;
+    display:flex;flex-direction:column;align-items:center;gap:3px;
+    min-width:0;
   }
-  .step .lab{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--mist-dim);font-weight:300}
-  .step .row{display:flex;align-items:center;gap:2px}
+  .step .lab{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--mist-dim);font-weight:300}
   .step .val{
-    min-width:34px;text-align:center;font-size:17px;font-weight:300;
-    color:rgba(233,239,255,.9);font-variant-numeric:tabular-nums;
+    font-size:19px;font-weight:300;line-height:1.15;
+    color:rgba(233,239,255,.92);font-variant-numeric:tabular-nums;
   }
+  .step .row{display:flex;align-items:center;gap:6px;margin-top:1px}
   .step .adj{
-    width:22px;height:22px;border-radius:50%;font-size:13px;line-height:1;
-    color:var(--mist-dim);transition:color .2s,background .2s;
+    width:26px;height:26px;border-radius:50%;font-size:14px;line-height:1;
+    color:var(--mist-dim);
+    display:grid;place-items:center;
+    border:1px solid var(--line);
+    transition:color .2s,border-color .2s,background .2s;
+    -webkit-tap-highlight-color:transparent;
   }
-  .step .adj:hover{color:var(--mist);background:rgba(174,185,216,.09)}
+  .step .adj:hover{color:var(--mist);border-color:rgba(174,185,216,.28);background:rgba(174,185,216,.05)}
+  .step .adj:active{background:rgba(174,185,216,.12)}
 
-  #actions{display:flex;align-items:center;gap:14px}
+  #actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   #toggle{
-    flex:1;height:46px;border:1px solid rgba(var(--c),.32);border-radius:999px;
+    flex:1 1 140px;min-width:0;
+    height:46px;border:1px solid rgba(var(--c),.32);border-radius:999px;
     background:rgba(var(--c),.06);
     font-size:11px;letter-spacing:.3em;text-transform:uppercase;font-weight:300;
     color:rgba(233,239,255,.9);transition:background .35s,border-color .35s;
   }
   #toggle:hover{background:rgba(var(--c),.12);border-color:rgba(var(--c),.5)}
-  #sound{display:flex;align-items:center;gap:9px}
-  #mute{width:26px;height:26px;color:var(--mist-dim);display:grid;place-items:center;transition:color .25s}
+  #sound{display:flex;align-items:center;gap:8px;flex-shrink:0}
+  #mute{width:32px;height:32px;color:var(--mist-dim);display:grid;place-items:center;transition:color .25s;-webkit-tap-highlight-color:transparent}
   #mute:hover,#mute.on{color:var(--mist)}
-  #mute svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+  #mute svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
   input[type=range]{
-    -webkit-appearance:none;appearance:none;width:74px;height:20px;background:none;cursor:pointer;
+    -webkit-appearance:none;appearance:none;width:68px;height:24px;background:none;cursor:pointer;
   }
   input[type=range]::-webkit-slider-runnable-track{height:1px;background:var(--line)}
   input[type=range]::-moz-range-track{height:1px;background:var(--line)}
@@ -156,9 +178,10 @@
 
   /* ---------- tone sheet ---------- */
   #toneBtn{
-    padding:0 12px;height:46px;border:1px solid var(--line);border-radius:999px;
+    padding:0 14px;height:46px;border:1px solid var(--line);border-radius:999px;
     font-size:10px;letter-spacing:.2em;text-transform:uppercase;font-weight:300;
     color:var(--mist-dim);transition:color .3s,border-color .3s;
+    flex-shrink:0;
   }
   #toneBtn:hover,#toneBtn[aria-expanded="true"]{color:var(--mist);border-color:rgba(174,185,216,.3)}
 
@@ -167,22 +190,26 @@
     opacity:0;pointer-events:none;transition:opacity .4s ease;
   }
   #scrim.open{opacity:1;pointer-events:auto}
-  #sheet{
+  .sheet{
     position:fixed;left:0;right:0;bottom:0;z-index:10;
     max-width:520px;margin:0 auto;
     background:linear-gradient(180deg,rgba(18,26,58,.97),rgba(10,14,27,.99));
     border-top:1px solid var(--line);border-radius:18px 18px 0 0;
     padding:16px 20px calc(20px + env(safe-area-inset-bottom));
-    max-height:80svh;overflow-y:auto;
+    max-height:80svh;overflow-y:auto;overscroll-behavior:contain;
     transform:translateY(103%);transition:transform .45s cubic-bezier(.2,.8,.2,1);
+    -webkit-overflow-scrolling:touch;
   }
-  #sheet.open{transform:none}
-  #sheetTop{
+  .sheet.open{transform:none}
+  .sheetTop{
     display:flex;justify-content:space-between;align-items:center;
     font-size:10px;letter-spacing:.22em;text-transform:uppercase;
     color:var(--mist-dim);font-weight:300;margin-bottom:14px;
   }
-  #done{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--mist)}
+  .done{
+    font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--mist);
+    padding:6px 4px;margin:-6px -4px;-webkit-tap-highlight-color:transparent;
+  }
   #voices{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:6px}
   .tr{
     display:grid;grid-template-columns:62px 1fr 54px;align-items:center;gap:12px;
@@ -203,49 +230,51 @@
   /* ---------- guide ---------- */
   #guideBar{
     width:100%;max-width:520px;margin:0 auto;
-    padding:14px 20px 0;flex:none;
+    padding:14px 16px 0;flex:none;
     transition:opacity 1.6s ease;
   }
   #guideBar.dim{opacity:.14}
   #guideBar:hover,#guideBar:focus-within{opacity:1;transition:opacity .35s ease}
   #guideBtn{
-    display:flex;align-items:center;justify-content:center;gap:7px;width:100%;
-    padding:2px 0;font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+    display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+    padding:4px 0;font-size:9px;letter-spacing:.2em;text-transform:uppercase;
     font-weight:300;color:var(--mist-dim);transition:color .3s;
+    -webkit-tap-highlight-color:transparent;
   }
-  #guideBtn:hover{color:var(--mist)}
-  #guideBtn .car{
-    display:inline-block;font-size:8px;line-height:1;
-    transition:transform .4s cubic-bezier(.2,.8,.2,1);
-  }
-  #guideBtn[aria-expanded="true"] .car{transform:rotate(180deg)}
-  #guideWrap{
-    display:grid;grid-template-rows:0fr;
-    transition:grid-template-rows .45s cubic-bezier(.2,.8,.2,1);
-  }
-  #guideWrap.open{grid-template-rows:1fr}
-  #guide{overflow:hidden;min-height:0}
+  #guideBtn:hover,#guideBtn[aria-expanded="true"]{color:var(--mist)}
+  #guideBtn .car{font-size:9px;line-height:1;opacity:.7}
+
   #guideInner{
-    padding:12px 2px 2px;
-    font-size:11px;line-height:1.6;color:rgba(174,185,216,.72);font-weight:300;
+    padding:2px 2px 4px;
+    font-size:12px;line-height:1.65;color:rgba(174,185,216,.82);font-weight:300;
   }
-  #guideInner p{margin-bottom:10px}
+  #guideInner p{margin-bottom:12px}
   #guideInner p:last-child{margin-bottom:0}
-  #guideInner dl{margin-bottom:10px}
+  #guideInner dl{margin-bottom:12px}
   #guideInner dt{
     font-size:9px;letter-spacing:.18em;text-transform:uppercase;
-    color:rgba(233,239,255,.82);margin-top:8px;
+    color:rgba(233,239,255,.82);margin-top:10px;
   }
   #guideInner dt:first-child{margin-top:0}
   #guideInner dd{margin-left:0}
   #guideInner em{
-    font-family:var(--display);font-style:italic;font-size:13px;
-    color:rgba(233,239,255,.8);
+    font-family:var(--display);font-style:italic;font-size:14px;
+    color:rgba(233,239,255,.85);
   }
 
   @media (max-height:660px){
-    #stage{height:min(58vw,240px)}
     #controls{gap:14px}
+    header{padding-top:14px}
+  }
+  @media (max-width:360px){
+    #controls{padding-left:12px;padding-right:12px}
+    #guideBar{padding-left:12px;padding-right:12px}
+    .chip{padding:6px 10px}
+    .step{padding:7px 2px 7px}
+    .step .val{font-size:18px}
+    #steppers{gap:5px}
+    #actions{gap:8px}
+    input[type=range]{width:56px}
   }
   @media (prefers-reduced-motion:reduce){
     #bloom{display:none}
@@ -261,23 +290,9 @@
 </header>
 
 <div id="guideBar">
-  <button id="guideBtn" type="button" aria-expanded="false" aria-controls="guide">
-    How to breathe with it <span class="car" aria-hidden="true">▾</span>
+  <button id="guideBtn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="guideSheet">
+    How to breathe with it <span class="car" aria-hidden="true">›</span>
   </button>
-  <div id="guideWrap"><div id="guide" role="region" aria-label="How to breathe with it"><div id="guideInner">
-    <p>One breath, four parts, on a loop — follow the circle, or close your eyes and follow the tone.</p>
-    <dl>
-      <dt>Inhale</dt>
-      <dd>Draw air in steadily through your nose, still filling as the circle reaches its widest.</dd>
-      <dt>Hold</dt>
-      <dd>Keep the air in with your throat open and your shoulders down — holding is not bracing.</dd>
-      <dt>Exhale</dt>
-      <dd>Let it out slowly and evenly, emptying further than feels automatic.</dd>
-      <dt>Rest</dt>
-      <dd>Stay empty and wait out the count before the next inhale — the part most people skip.</dd>
-    </dl>
-    <p>A <em>0</em> in a pattern removes that phase. If you feel lightheaded, shorten the counts.</p>
-  </div></div></div>
 </div>
 
 <main>
@@ -313,8 +328,25 @@
 </div>
 
 <div id="scrim"></div>
-<section id="sheet" aria-label="Tone">
-  <div id="sheetTop"><span>Tone</span><button id="done" type="button">Done</button></div>
+<section id="guideSheet" class="sheet" role="dialog" aria-modal="true" aria-label="How to breathe with it">
+  <div class="sheetTop"><span>How to breathe</span><button id="guideDone" class="done" type="button">Done</button></div>
+  <div id="guideInner">
+    <p>One breath, four parts, on a loop — follow the circle, or close your eyes and follow the tone.</p>
+    <dl>
+      <dt>Inhale</dt>
+      <dd>Draw air in steadily through your nose, still filling as the circle reaches its widest.</dd>
+      <dt>Hold</dt>
+      <dd>Keep the air in with your throat open and your shoulders down — holding is not bracing.</dd>
+      <dt>Exhale</dt>
+      <dd>Let it out slowly and evenly, emptying further than feels automatic.</dd>
+      <dt>Rest</dt>
+      <dd>Stay empty and wait out the count before the next inhale — the part most people skip.</dd>
+    </dl>
+    <p>A <em>0</em> in a pattern removes that phase. If you feel lightheaded, shorten the counts.</p>
+  </div>
+</section>
+<section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-label="Tone">
+  <div class="sheetTop"><span>Tone</span><button id="done" class="done" type="button">Done</button></div>
   <div id="voices" role="group" aria-label="Voice presets"></div>
   <div id="toneGrid"></div>
 </section>
@@ -657,9 +689,9 @@
     const wrap = document.createElement("div");
     wrap.className = "step";
     wrap.innerHTML = `<span class="lab">${LABELS[k]}</span>
+      <span class="val">${fmt(pattern[i])}</span>
       <span class="row">
         <button class="adj" type="button" aria-label="Less ${LABELS[k]} time">–</button>
-        <span class="val">${fmt(pattern[i])}</span>
         <button class="adj" type="button" aria-label="More ${LABELS[k]} time">+</button>
       </span>`;
     const [minus, plus] = wrap.querySelectorAll(".adj");
@@ -702,13 +734,21 @@
   };
 
   /* ---------------- guide ---------------- */
-  const guideBtn = $("guideBtn"), guideWrap = $("guideWrap");
+  const guideBtn = $("guideBtn");
   function openGuide(on){
-    guideWrap.classList.toggle("open", on);
+    if (on) openSheet(false);
+    $("guideSheet").classList.toggle("open", on);
     guideBtn.setAttribute("aria-expanded", on);
+    syncScrim();
     nudge();
   }
-  guideBtn.onclick = () => openGuide(!guideWrap.classList.contains("open"));
+  guideBtn.onclick = () => openGuide(!$("guideSheet").classList.contains("open"));
+  $("guideDone").onclick = () => openGuide(false);
+
+  function syncScrim(){
+    const any = $("sheet").classList.contains("open") || $("guideSheet").classList.contains("open");
+    $("scrim").classList.toggle("open", any);
+  }
 
   /* ---------------- tone sheet ---------------- */
   const VOICES = [
@@ -775,18 +815,22 @@
   markVoice();
 
   function openSheet(on){
+    if (on) openGuide(false);
     $("sheet").classList.toggle("open", on);
-    $("scrim").classList.toggle("open", on);
     $("toneBtn").setAttribute("aria-expanded", on);
+    syncScrim();
     if (on){ initAudio(); if (ctx.state === "suspended") ctx.resume(); }
     else endPreview();
   }
   $("toneBtn").onclick = () => openSheet(!$("sheet").classList.contains("open"));
   $("done").onclick = () => openSheet(false);
-  $("scrim").onclick = () => openSheet(false);
+  $("scrim").onclick = () => { openGuide(false); openSheet(false); };
 
   addEventListener("keydown", e => {
-    if (e.key === "Escape" && $("sheet").classList.contains("open")) openSheet(false);
+    if (e.key === "Escape"){
+      if ($("sheet").classList.contains("open")) openSheet(false);
+      else if ($("guideSheet").classList.contains("open")) openGuide(false);
+    }
     if (e.code === "Space" && e.target.tagName !== "INPUT" && e.target.tagName !== "BUTTON"){
       e.preventDefault(); running ? stop() : start();
     }

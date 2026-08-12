@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cadence — paced breathing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --night:#0A0E1B;
+    --night-2:#101733;
+    --mist:#AEB9D8;
+    --mist-dim:#5C6789;
+    --line:rgba(174,185,216,.14);
+    --in:127,216,222;    /* pale aqua  */
+    --out:185,160,232;   /* soft lilac */
+    --c:127,216,222;     /* live orb colour, set by JS */
+    --display:"Cormorant Garamond",Georgia,serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:
+      radial-gradient(120% 90% at 50% 38%, var(--night-2) 0%, var(--night) 62%),
+      var(--night);
+    color:var(--mist);
+    font-family:var(--mono);
+    -webkit-font-smoothing:antialiased;
+    display:flex;flex-direction:column;
+    min-height:100svh;
+    overflow:hidden;
+  }
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  :focus-visible{outline:1px solid rgba(var(--c),.85);outline-offset:3px;border-radius:2px}
+
+  /* ---------- header ---------- */
+  header{
+    display:flex;justify-content:space-between;align-items:baseline;
+    padding:22px 24px 0;
+    font-size:10px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--mist-dim);font-weight:300;
+  }
+  #stats{font-variant-numeric:tabular-nums;letter-spacing:.14em}
+
+  /* ---------- stage ---------- */
+  main{flex:1;display:grid;place-items:center;padding:8px 20px}
+  #stage{
+    position:relative;
+    width:min(74vw,320px);aspect-ratio:1;
+    display:grid;place-items:center;
+  }
+  #bloom,#orb{
+    position:absolute;inset:0;margin:auto;
+    width:74%;aspect-ratio:1;border-radius:50%;
+    will-change:transform;
+  }
+  #bloom{
+    background:radial-gradient(circle,rgba(var(--c),.30) 0%,rgba(var(--c),.06) 45%,rgba(var(--c),0) 70%);
+    filter:blur(26px);
+    transform:scale(1.4);
+  }
+  #orb{
+    background:radial-gradient(circle at 50% 44%,
+      rgba(var(--c),.92) 0%,
+      rgba(var(--c),.52) 34%,
+      rgba(var(--c),.20) 56%,
+      rgba(var(--c),.05) 72%,
+      rgba(var(--c),0) 82%);
+    filter:blur(1.5px);
+  }
+  #dial{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+  #dial .seg{fill:none;stroke-linecap:round;transition:opacity .5s ease,stroke-width .5s ease}
+  #dot{transition:opacity .6s ease}
+
+  #center{position:relative;text-align:center;pointer-events:none}
+  #phase{
+    font-family:var(--display);font-weight:300;
+    font-size:clamp(26px,7.4vw,34px);
+    letter-spacing:.02em;line-height:1.1;
+    color:rgba(233,239,255,.92);
+    text-shadow:0 0 26px rgba(var(--c),.35);
+  }
+  #count{
+    margin-top:10px;font-size:11px;font-weight:300;
+    letter-spacing:.26em;color:rgba(174,185,216,.42);
+    font-variant-numeric:tabular-nums;
+  }
+
+  /* ---------- controls ---------- */
+  #controls{
+    padding:0 20px calc(24px + env(safe-area-inset-bottom));
+    width:100%;max-width:520px;margin:0 auto;
+    display:flex;flex-direction:column;gap:20px;
+    transition:opacity 1.6s ease;
+  }
+  #controls.dim{opacity:.14}
+  #controls:hover,#controls:focus-within{opacity:1;transition:opacity .35s ease}
+
+  #presets{display:flex;flex-wrap:wrap;gap:7px;justify-content:center}
+  .chip{
+    padding:7px 12px;border:1px solid var(--line);border-radius:999px;
+    font-size:10px;letter-spacing:.16em;text-transform:uppercase;font-weight:300;
+    color:var(--mist-dim);transition:color .3s,border-color .3s,background .3s;
+    white-space:nowrap;
+  }
+  .chip .p{margin-left:7px;opacity:.62;letter-spacing:.08em}
+  .chip:hover{color:var(--mist);border-color:rgba(174,185,216,.3)}
+  .chip[aria-pressed="true"]{
+    color:rgba(233,239,255,.95);
+    border-color:rgba(var(--c),.5);
+    background:rgba(var(--c),.07);
+  }
+
+  #steppers{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .step{
+    border:1px solid var(--line);border-radius:12px;padding:9px 4px 7px;
+    display:flex;flex-direction:column;align-items:center;gap:4px;
+  }
+  .step .lab{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--mist-dim);font-weight:300}
+  .step .row{display:flex;align-items:center;gap:2px}
+  .step .val{
+    min-width:34px;text-align:center;font-size:17px;font-weight:300;
+    color:rgba(233,239,255,.9);font-variant-numeric:tabular-nums;
+  }
+  .step .adj{
+    width:22px;height:22px;border-radius:50%;font-size:13px;line-height:1;
+    color:var(--mist-dim);transition:color .2s,background .2s;
+  }
+  .step .adj:hover{color:var(--mist);background:rgba(174,185,216,.09)}
+
+  #actions{display:flex;align-items:center;gap:14px}
+  #toggle{
+    flex:1;height:46px;border:1px solid rgba(var(--c),.32);border-radius:999px;
+    background:rgba(var(--c),.06);
+    font-size:11px;letter-spacing:.3em;text-transform:uppercase;font-weight:300;
+    color:rgba(233,239,255,.9);transition:background .35s,border-color .35s;
+  }
+  #toggle:hover{background:rgba(var(--c),.12);border-color:rgba(var(--c),.5)}
+  #sound{display:flex;align-items:center;gap:9px}
+  #mute{width:26px;height:26px;color:var(--mist-dim);display:grid;place-items:center;transition:color .25s}
+  #mute:hover,#mute.on{color:var(--mist)}
+  #mute svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+  input[type=range]{
+    -webkit-appearance:none;appearance:none;width:74px;height:20px;background:none;cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track{height:1px;background:var(--line)}
+  input[type=range]::-moz-range-track{height:1px;background:var(--line)}
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:9px;height:9px;border-radius:50%;
+    background:var(--mist);margin-top:-4px;
+  }
+  input[type=range]::-moz-range-thumb{width:9px;height:9px;border:none;border-radius:50%;background:var(--mist)}
+
+  /* ---------- tone sheet ---------- */
+  #toneBtn{
+    padding:0 12px;height:46px;border:1px solid var(--line);border-radius:999px;
+    font-size:10px;letter-spacing:.2em;text-transform:uppercase;font-weight:300;
+    color:var(--mist-dim);transition:color .3s,border-color .3s;
+  }
+  #toneBtn:hover,#toneBtn[aria-expanded="true"]{color:var(--mist);border-color:rgba(174,185,216,.3)}
+
+  #scrim{
+    position:fixed;inset:0;z-index:9;background:rgba(6,9,18,.5);
+    opacity:0;pointer-events:none;transition:opacity .4s ease;
+  }
+  #scrim.open{opacity:1;pointer-events:auto}
+  #sheet{
+    position:fixed;left:0;right:0;bottom:0;z-index:10;
+    max-width:520px;margin:0 auto;
+    background:linear-gradient(180deg,rgba(18,26,58,.97),rgba(10,14,27,.99));
+    border-top:1px solid var(--line);border-radius:18px 18px 0 0;
+    padding:16px 20px calc(20px + env(safe-area-inset-bottom));
+    max-height:80svh;overflow-y:auto;
+    transform:translateY(103%);transition:transform .45s cubic-bezier(.2,.8,.2,1);
+  }
+  #sheet.open{transform:none}
+  #sheetTop{
+    display:flex;justify-content:space-between;align-items:center;
+    font-size:10px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--mist-dim);font-weight:300;margin-bottom:14px;
+  }
+  #done{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--mist)}
+  #voices{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:6px}
+  .tr{
+    display:grid;grid-template-columns:62px 1fr 54px;align-items:center;gap:12px;
+    padding:8px 0;border-bottom:1px solid rgba(174,185,216,.06);
+  }
+  .tr:last-child{border-bottom:none}
+  .tr .lab{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--mist-dim);font-weight:300}
+  .tr .out{
+    font-size:10px;text-align:right;color:rgba(233,239,255,.75);
+    font-variant-numeric:tabular-nums;letter-spacing:.06em;
+  }
+  .tr input[type=range]{width:100%}
+  .tr .hint{
+    grid-column:1/-1;font-size:9px;line-height:1.5;color:rgba(92,103,137,.85);
+    letter-spacing:.05em;margin-top:-2px;
+  }
+
+  @media (max-height:660px){
+    #stage{width:min(58vw,240px)}
+    #controls{gap:14px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    #bloom{display:none}
+    *{transition-duration:.01ms !important}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <span>Cadence</span>
+  <span id="stats">0 breaths · 0:00</span>
+</header>
+
+<main>
+  <div id="stage">
+    <div id="bloom"></div>
+    <div id="orb"></div>
+    <svg id="dial" viewBox="0 0 400 400" aria-hidden="true">
+      <g id="segs" transform="rotate(-90 200 200)"></g>
+      <circle id="dot" cx="200" cy="32" r="3" fill="rgb(var(--c))" opacity="0"></circle>
+    </svg>
+    <div id="center">
+      <div id="phase" aria-live="polite" aria-atomic="true">Focus</div>
+      <div id="count" aria-hidden="true">16s cycle</div>
+    </div>
+  </div>
+</main>
+
+<div id="controls">
+  <div id="presets" role="group" aria-label="Breathing patterns"></div>
+
+  <div id="steppers"></div>
+
+  <div id="actions">
+    <button id="toggle">Begin</button>
+    <button id="toneBtn" aria-expanded="false" aria-controls="sheet">Tone</button>
+    <div id="sound">
+      <button id="mute" class="on" aria-pressed="false" aria-label="Mute tone">
+        <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path id="w1" d="M15.5 8.5a5 5 0 0 1 0 7"/><path id="w2" d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+      </button>
+      <input id="vol" type="range" min="0" max="100" value="55" aria-label="Tone volume">
+    </div>
+  </div>
+</div>
+
+<div id="scrim"></div>
+<section id="sheet" aria-label="Tone">
+  <div id="sheetTop"><span>Tone</span><button id="done" type="button">Done</button></div>
+  <div id="voices" role="group" aria-label="Voice presets"></div>
+  <div id="toneGrid"></div>
+</section>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ---------------- patterns ---------------- */
+  const PRESETS = [
+    { name:"Focus",   p:[4,4,4,4],     note:"box breathing" },
+    { name:"Balance", p:[5.5,0,5.5,0], note:"coherent, ~5.5 breaths/min" },
+    { name:"Unwind",  p:[4,0,8,0],     note:"extended exhale" },
+    { name:"Sleep",   p:[4,7,8,0],     note:"4-7-8" },
+    { name:"Settle",  p:[6,0,6,0],     note:"slow even" },
+    { name:"Energize",p:[4,0,2,0],     note:"quick exhale" },
+  ];
+  const KEYS = ["in","hold1","out","hold2"];
+  const LABELS = { in:"Inhale", hold1:"Hold", out:"Exhale", hold2:"Rest" };
+  const WORDS  = { in:"Breathe in", hold1:"Hold", out:"Breathe out", hold2:"Rest" };
+  const MIN = { in:1, hold1:0, out:1, hold2:0 };
+  const MAX = 20;
+
+  let pattern = PRESETS[0].p.slice();
+  let pending = null;              // pattern change queued to next cycle
+  let presetName = PRESETS[0].name;
+
+  /* ---------------- elements ---------------- */
+  const $ = id => document.getElementById(id);
+  const orb=$("orb"), bloom=$("bloom"), phaseEl=$("phase"), countEl=$("count"),
+        statsEl=$("stats"), segsEl=$("segs"), dotEl=$("dot"),
+        toggleBtn=$("toggle"), controls=$("controls"), volEl=$("vol"), muteBtn=$("mute");
+
+  const R = 168, C = 2 * Math.PI * R, SCALE_MIN = .40, SCALE_MAX = 1;
+  const IN_RGB = [127,216,222], OUT_RGB = [185,160,232];
+
+  /* ---------------- state ---------------- */
+  let phases = [], running = false, idx = 0, phaseStart = 0,
+      breaths = 0, elapsed = 0, lastTick = 0, rafId = 0, idleTimer = 0;
+
+  const fmt = n => (Math.round(n*10)/10).toString().replace(/\.0$/,"");
+  const total = p => p.reduce((a,b)=>a+b,0);
+
+  function buildPhases(){
+    phases = KEYS.map((k,i)=>({key:k, dur:pattern[i]})).filter(p=>p.dur>0);
+  }
+
+  /* ---------------- dial ---------------- */
+  function drawDial(){
+    const T = total(pattern), gap = 10;
+    segsEl.innerHTML = "";
+    let off = 0;
+    phases.forEach((ph,i) => {
+      const len = C * ph.dur / T;
+      const draw = Math.max(len - gap, 1);
+      const c = document.createElementNS("http://www.w3.org/2000/svg","circle");
+      const warm = (ph.key === "out" || ph.key === "hold2");
+      c.setAttribute("class","seg");
+      c.setAttribute("cx",200); c.setAttribute("cy",200); c.setAttribute("r",R);
+      c.setAttribute("stroke", `rgba(${(warm?OUT_RGB:IN_RGB).join(",")},1)`);
+      c.setAttribute("stroke-width", 1.5);
+      c.setAttribute("stroke-dasharray", `${draw} ${C-draw}`);
+      c.setAttribute("stroke-dashoffset", -off);
+      c.setAttribute("opacity", .16);
+      c.dataset.i = i;
+      segsEl.appendChild(c);
+      off += len;
+    });
+    highlight();
+  }
+  function highlight(){
+    [...segsEl.children].forEach((el,i)=>{
+      const on = running && i === idx;
+      el.setAttribute("opacity", on ? .78 : .16);
+      el.setAttribute("stroke-width", on ? 2.5 : 1.5);
+    });
+  }
+
+  /* ---------------- audio ---------------- */
+  let ctx=null, master=null, filt=null, oscMix=null, noiseBP=null, noiseGain=null,
+      voices=[], muted=false, previewing=false, previewTimer=0;
+
+  const TONE = { base:175, rise:7, body:16, breadth:20, air:0 };
+  const ratio = () => Math.pow(2, TONE.rise/12);
+  const vol = () => muted ? 0 : (+volEl.value/100) * 0.16;
+  const SPREAD = [0,-1,1];
+
+  /* harmonic series: body 0 = pure sine, body 100 = reedy */
+  function makeWave(){
+    const n = 10, real = new Float32Array(n), imag = new Float32Array(n);
+    const b = TONE.body/100;
+    imag[1] = 1;
+    for (let h=2; h<n; h++) imag[h] = Math.pow(b, 1 + (h-2)*.5) / (h*.85);
+    return ctx.createPeriodicWave(real, imag, {disableNormalization:false});
+  }
+
+  function pinkBuffer(){
+    const len = Math.floor(ctx.sampleRate*3);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+    for (let i=0;i<len;i++){
+      const w = Math.random()*2-1;
+      b0=.99886*b0+w*.0555179; b1=.99332*b1+w*.0750759; b2=.96900*b2+w*.1538520;
+      b3=.86650*b3+w*.3104856; b4=.55000*b4+w*.5329522; b5=-.7616*b5-w*.0168980;
+      d[i]=(b0+b1+b2+b3+b4+b5+b6+w*.5362)*.11; b6=w*.115926;
+    }
+    return buf;
+  }
+
+  function initAudio(){
+    if (ctx) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = 0;
+    master.connect(ctx.destination);
+
+    filt = ctx.createBiquadFilter(); filt.type = "lowpass";
+    filt.frequency.value = TONE.base*2.4; filt.Q.value = .4;
+    filt.connect(master);
+
+    oscMix = ctx.createGain(); oscMix.gain.value = .75; oscMix.connect(filt);
+
+    const wave = makeWave();
+    SPREAD.forEach((s,i) => {
+      const o = ctx.createOscillator();
+      o.setPeriodicWave(wave); o.frequency.value = TONE.base;
+      const g = ctx.createGain(); g.gain.value = i===0 ? 1 : .3;
+      let p = null;
+      try { p = ctx.createStereoPanner(); g.connect(p); p.connect(oscMix); }
+      catch(e){ g.connect(oscMix); }
+      o.connect(g); o.start();
+      voices.push({o,g,p});
+    });
+
+    const src = ctx.createBufferSource();
+    src.buffer = pinkBuffer(); src.loop = true;
+    noiseBP = ctx.createBiquadFilter(); noiseBP.type = "bandpass";
+    noiseBP.frequency.value = TONE.base*2.4; noiseBP.Q.value = .7;
+    noiseGain = ctx.createGain(); noiseGain.gain.value = 0;
+    src.connect(noiseBP); noiseBP.connect(noiseGain); noiseGain.connect(master);
+    src.start();
+
+    applyTone();
+  }
+
+  /* live-updates the character of the tone without interrupting it */
+  function applyTone(){
+    if (!ctx) return;
+    const t = ctx.currentTime, wave = makeWave(), w = TONE.breadth/100;
+    voices.forEach((v,i) => {
+      v.o.setPeriodicWave(wave);
+      v.o.detune.setTargetAtTime(SPREAD[i] * w * 42, t, .08);
+      if (v.p) v.p.pan.setTargetAtTime(SPREAD[i] * w * .85, t, .08);
+      v.g.gain.setTargetAtTime(i===0 ? 1 : .06 + w*.55, t, .08);
+    });
+    oscMix.gain.setTargetAtTime(.75 - w*.18, t, .08);
+    noiseGain.gain.setTargetAtTime(Math.pow(TONE.air/100, 1.4) * 2.2, t, .12);
+  }
+
+  function voice(key, dur){
+    if (!ctx) return;
+    const t = ctx.currentTime, v = vol(), lo = TONE.base, hi = lo * ratio();
+    const glide = (param, target) => {
+      param.cancelScheduledValues(t);
+      param.setValueAtTime(Math.max(param.value, .0001), t);
+      param.exponentialRampToValueAtTime(Math.max(target, .0001), t + dur);
+    };
+    master.gain.cancelScheduledValues(t);
+    master.gain.setValueAtTime(Math.max(master.gain.value, .0001), t);
+
+    if (key === "in"){
+      voices.forEach(x => glide(x.o.frequency, hi));
+      glide(filt.frequency, lo*8); glide(noiseBP.frequency, lo*7);
+      master.gain.linearRampToValueAtTime(v, t + dur);
+    } else if (key === "out"){
+      voices.forEach(x => glide(x.o.frequency, lo));
+      glide(filt.frequency, lo*2.4); glide(noiseBP.frequency, lo*2.4);
+      master.gain.linearRampToValueAtTime(v * .10, t + dur);
+    } else if (key === "hold1"){
+      master.gain.linearRampToValueAtTime(v * .75, t + Math.min(dur,.6));
+    } else {
+      master.gain.linearRampToValueAtTime(v * .05, t + Math.min(dur,.6));
+    }
+  }
+
+  /* audition the current tone while paused */
+  function preview(){
+    if (running) return;
+    initAudio();
+    if (ctx.state === "suspended") ctx.resume();
+    const t = ctx.currentTime, mid = TONE.base * Math.pow(ratio(), .55);
+    voices.forEach(x => x.o.frequency.setTargetAtTime(mid, t, .12));
+    filt.frequency.setTargetAtTime(TONE.base*5, t, .12);
+    noiseBP.frequency.setTargetAtTime(TONE.base*4.5, t, .12);
+    if (!previewing){
+      previewing = true;
+      master.gain.cancelScheduledValues(t);
+      master.gain.setValueAtTime(master.gain.value, t);
+      master.gain.linearRampToValueAtTime(vol() * .9, t + .5);
+    }
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(endPreview, 1900);
+  }
+  function endPreview(){
+    clearTimeout(previewTimer);
+    if (!ctx || !previewing) return;
+    previewing = false;
+    const t = ctx.currentTime;
+    master.gain.cancelScheduledValues(t);
+    master.gain.setValueAtTime(master.gain.value, t);
+    master.gain.linearRampToValueAtTime(0, t + .9);
+  }
+
+  function hushAudio(){
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    master.gain.cancelScheduledValues(t);
+    master.gain.setValueAtTime(master.gain.value, t);
+    master.gain.linearRampToValueAtTime(0, t + .5);
+  }
+
+  /* ---------------- render ---------------- */
+  const ease = p => (1 - Math.cos(Math.PI * Math.min(Math.max(p,0),1))) / 2;
+
+  function paint(fullness, cycleProg, showDot){
+    const s = SCALE_MIN + (SCALE_MAX - SCALE_MIN) * fullness;
+    orb.style.transform = `scale(${s.toFixed(4)})`;
+    bloom.style.transform = `scale(${(s*1.35).toFixed(4)})`;
+    const c = IN_RGB.map((v,i)=>Math.round(v + (OUT_RGB[i]-v) * (1-fullness)));
+    document.documentElement.style.setProperty("--c", c.join(","));
+    const a = (cycleProg * 2 * Math.PI) - Math.PI/2;
+    dotEl.setAttribute("cx", (200 + R*Math.cos(a)).toFixed(2));
+    dotEl.setAttribute("cy", (200 + R*Math.sin(a)).toFixed(2));
+    dotEl.setAttribute("opacity", showDot ? .9 : 0);
+    dotEl.setAttribute("fill", `rgb(${c.join(",")})`);
+  }
+
+  function idle(){
+    paint(0, 0, false);
+    phaseEl.textContent = presetName;
+    countEl.textContent = `${fmt(total(pattern))}s cycle`;
+  }
+
+  function frame(now){
+    if (!running) return;
+    const ph = phases[idx];
+    let t = (now - phaseStart) / 1000;
+
+    if (t > ph.dur * 2 + 4) { phaseStart = now; t = 0; }   // returned from a backgrounded tab
+
+    if (t >= ph.dur){
+      phaseStart += ph.dur * 1000;
+      idx++;
+      if (idx >= phases.length){
+        idx = 0; breaths++;
+        if (pending){ pattern = pending; pending = null; buildPhases(); drawDial(); }
+      }
+      highlight();
+      const next = phases[idx];
+      phaseEl.textContent = WORDS[next.key];
+      voice(next.key, next.dur);
+      return (rafId = requestAnimationFrame(frame));
+    }
+
+    elapsed += (now - lastTick) / 1000; lastTick = now;
+    const p = t / ph.dur;
+    const fullness = ph.key === "in" ? ease(p)
+                   : ph.key === "out" ? 1 - ease(p)
+                   : ph.key === "hold1" ? 1 : 0;
+
+    let before = 0;
+    for (let i = 0; i < idx; i++) before += phases[i].dur;
+    paint(fullness, (before + t) / total(pattern), true);
+
+    countEl.textContent = Math.ceil(ph.dur - t - .001);
+    const m = Math.floor(elapsed/60), s = Math.floor(elapsed%60);
+    statsEl.textContent = `${breaths} breath${breaths===1?"":"s"} · ${m}:${String(s).padStart(2,"0")}`;
+
+    rafId = requestAnimationFrame(frame);
+  }
+
+  /* ---------------- transport ---------------- */
+  function start(){
+    initAudio();
+    if (ctx.state === "suspended") ctx.resume();
+    clearTimeout(previewTimer); previewing = false;
+    buildPhases(); drawDial();
+    running = true; idx = 0;
+    phaseStart = lastTick = performance.now();
+    toggleBtn.textContent = "Pause";
+    phaseEl.textContent = WORDS[phases[0].key];
+    voice(phases[0].key, phases[0].dur);
+    highlight();
+    rafId = requestAnimationFrame(frame);
+    nudge();
+  }
+  function stop(){
+    running = false;
+    cancelAnimationFrame(rafId);
+    hushAudio();
+    toggleBtn.textContent = "Begin";
+    controls.classList.remove("dim");
+    clearTimeout(idleTimer);
+    highlight();
+    idle();
+  }
+  function nudge(){
+    controls.classList.remove("dim");
+    clearTimeout(idleTimer);
+    if (running) idleTimer = setTimeout(()=>controls.classList.add("dim"), 12000);
+  }
+
+  /* ---------------- controls ---------------- */
+  PRESETS.forEach(pre => {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.type = "button";
+    b.setAttribute("aria-pressed", pre.name === presetName);
+    b.title = pre.note;
+    b.innerHTML = `${pre.name}<span class="p">${pre.p.map(fmt).join("-")}</span>`;
+    b.onclick = () => {
+      presetName = pre.name;
+      applyPattern(pre.p.slice());
+      syncPresets();
+    };
+    $("presets").appendChild(b);
+  });
+  function syncPresets(){
+    [...$("presets").children].forEach((el,i) =>
+      el.setAttribute("aria-pressed", PRESETS[i].name === presetName));
+  }
+
+  const valEls = {};
+  KEYS.forEach((k,i) => {
+    const wrap = document.createElement("div");
+    wrap.className = "step";
+    wrap.innerHTML = `<span class="lab">${LABELS[k]}</span>
+      <span class="row">
+        <button class="adj" type="button" aria-label="Less ${LABELS[k]} time">–</button>
+        <span class="val">${fmt(pattern[i])}</span>
+        <button class="adj" type="button" aria-label="More ${LABELS[k]} time">+</button>
+      </span>`;
+    const [minus, plus] = wrap.querySelectorAll(".adj");
+    minus.onclick = () => bump(i,-0.5);
+    plus.onclick  = () => bump(i, 0.5);
+    valEls[i] = wrap.querySelector(".val");
+    $("steppers").appendChild(wrap);
+  });
+
+  function bump(i, d){
+    const base = (pending || pattern).slice();
+    base[i] = Math.min(MAX, Math.max(MIN[KEYS[i]], base[i] + d));
+    if (base[i] === 0.5 && MIN[KEYS[i]] === 0 && d < 0) base[i] = 0;
+    presetName = "Custom";
+    const match = PRESETS.find(p => p.p.every((v,j) => v === base[j]));
+    if (match) presetName = match.name;
+    syncPresets();
+    applyPattern(base);
+  }
+
+  function applyPattern(p){
+    KEYS.forEach((_,i) => valEls[i].textContent = fmt(p[i]));
+    if (running){ pending = p; }                 // takes effect at the next full breath
+    else { pattern = p; buildPhases(); drawDial(); idle(); }
+  }
+
+  toggleBtn.onclick = () => running ? stop() : start();
+
+  volEl.oninput = () => {
+    if (muted){ muted = false; muteBtn.classList.add("on"); muteBtn.setAttribute("aria-pressed","false"); }
+    if (ctx && running) master.gain.setTargetAtTime(vol()*.6, ctx.currentTime, .3);
+  };
+  muteBtn.onclick = () => {
+    muted = !muted;
+    muteBtn.classList.toggle("on", !muted);
+    muteBtn.setAttribute("aria-pressed", muted);
+    muteBtn.setAttribute("aria-label", muted ? "Unmute tone" : "Mute tone");
+    $("w1").style.opacity = $("w2").style.opacity = muted ? 0 : 1;
+    if (ctx) master.gain.setTargetAtTime(muted ? 0 : vol()*.6, ctx.currentTime, .2);
+  };
+
+  /* ---------------- tone sheet ---------------- */
+  const VOICES = [
+    { name:"Glass",  t:{base:175,    rise:7,  body:10, breadth:16, air:0}  },
+    { name:"Reed",   t:{base:147,    rise:7,  body:58, breadth:34, air:6}  },
+    { name:"Breath", t:{base:196,    rise:5,  body:6,  breadth:44, air:64} },
+    { name:"Drone",  t:{base:110,    rise:3,  body:30, breadth:78, air:20} },
+    { name:"Tide",   t:{base:131,    rise:10, body:4,  breadth:60, air:88} },
+  ];
+  const SLIDERS = [
+    { k:"base",    lab:"Pitch",   min:70,  max:330, step:1, out:v=>Math.round(v)+" Hz",
+      hint:"Where the breath tone sits. Lower carries better at night." },
+    { k:"rise",    lab:"Rise",    min:0,   max:12,  step:1, out:v=>v==0?"flat":v+" st",
+      hint:"How far the pitch climbs on the inhale. 0 holds one note." },
+    { k:"body",    lab:"Body",    min:0,   max:100, step:1, out:v=>v+"",
+      hint:"Pure sine at 0, reedier and more present as it rises." },
+    { k:"breadth", lab:"Breadth", min:0,   max:100, step:1, out:v=>v+"",
+      hint:"Detunes and spreads three voices across the stereo field." },
+    { k:"air",     lab:"Air",     min:0,   max:100, step:1, out:v=>v+"",
+      hint:"Pink noise filtered to track the breath, like wind through the tone." },
+  ];
+
+  const outEls = {}, inEls = {};
+  SLIDERS.forEach(s => {
+    const row = document.createElement("div");
+    row.className = "tr";
+    row.innerHTML =
+      `<label class="lab" for="t-${s.k}">${s.lab}</label>
+       <input id="t-${s.k}" type="range" min="${s.min}" max="${s.max}" step="${s.step}" value="${TONE[s.k]}">
+       <span class="out"></span>
+       <span class="hint">${s.hint}</span>`;
+    const inp = row.querySelector("input"), out = row.querySelector(".out");
+    out.textContent = s.out(TONE[s.k]);
+    inEls[s.k] = inp; outEls[s.k] = out;
+    inp.addEventListener("input", () => {
+      TONE[s.k] = +inp.value;
+      out.textContent = s.out(TONE[s.k]);
+      applyTone();
+      if (!running) preview();
+      markVoice();
+    });
+    $("toneGrid").appendChild(row);
+  });
+
+  VOICES.forEach(v => {
+    const b = document.createElement("button");
+    b.className = "chip"; b.type = "button"; b.textContent = v.name;
+    b.setAttribute("aria-pressed","false");
+    b.onclick = () => {
+      Object.assign(TONE, v.t);
+      SLIDERS.forEach(s => { inEls[s.k].value = TONE[s.k]; outEls[s.k].textContent = s.out(TONE[s.k]); });
+      applyTone();
+      if (!running) preview();
+      markVoice();
+    };
+    $("voices").appendChild(b);
+  });
+  function markVoice(){
+    [...$("voices").children].forEach((el,i) => {
+      const t = VOICES[i].t;
+      el.setAttribute("aria-pressed", Object.keys(t).every(k => TONE[k] === t[k]));
+    });
+  }
+  markVoice();
+
+  function openSheet(on){
+    $("sheet").classList.toggle("open", on);
+    $("scrim").classList.toggle("open", on);
+    $("toneBtn").setAttribute("aria-expanded", on);
+    if (on){ initAudio(); if (ctx.state === "suspended") ctx.resume(); }
+    else endPreview();
+  }
+  $("toneBtn").onclick = () => openSheet(!$("sheet").classList.contains("open"));
+  $("done").onclick = () => openSheet(false);
+  $("scrim").onclick = () => openSheet(false);
+
+  addEventListener("keydown", e => {
+    if (e.key === "Escape" && $("sheet").classList.contains("open")) openSheet(false);
+    if (e.code === "Space" && e.target.tagName !== "INPUT" && e.target.tagName !== "BUTTON"){
+      e.preventDefault(); running ? stop() : start();
+    }
+    nudge();
+  });
+  ["pointermove","pointerdown","touchstart"].forEach(ev => addEventListener(ev, nudge, {passive:true}));
+  addEventListener("visibilitychange", () => { if (document.hidden && running) stop(); });
+
+  buildPhases(); drawDial(); idle();
+})();
+</script>
+</body>
+</html>

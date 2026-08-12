@@ -44,6 +44,12 @@
     color:var(--mist-dim);font-weight:300;
   }
   #stats{font-variant-numeric:tabular-nums;letter-spacing:.14em}
+  /* build stamp — deliberately faint; it is a diagnostic, not chrome */
+  #ver{
+    font-size:9px;letter-spacing:.08em;text-transform:none;
+    font-variant-numeric:tabular-nums;
+    color:rgba(92,103,137,.55);margin-left:8px;
+  }
 
   /* ---------- stage ---------- */
   main{
@@ -377,7 +383,7 @@
 <body>
 
 <header>
-  <span>Cadence</span>
+  <span>Cadence<span id="ver">2026.08.12.1946</span></span>
   <span id="stats">0 breaths · 0:00</span>
 </header>
 

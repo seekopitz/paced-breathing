@@ -46,10 +46,10 @@
   #stats{font-variant-numeric:tabular-nums;letter-spacing:.14em}
 
   /* ---------- stage ---------- */
-  main{flex:1;display:grid;place-items:center;padding:8px 20px}
+  main{flex:1;min-height:0;display:grid;place-items:center;padding:8px 20px}
   #stage{
     position:relative;
-    width:min(74vw,320px);aspect-ratio:1;
+    height:min(74vw,320px);max-height:100%;width:auto;aspect-ratio:1;
     display:grid;place-items:center;
   }
   #bloom,#orb{
@@ -200,8 +200,51 @@
     letter-spacing:.05em;margin-top:-2px;
   }
 
+  /* ---------- guide ---------- */
+  #guideBar{
+    width:100%;max-width:520px;margin:0 auto;
+    padding:14px 20px 0;flex:none;
+    transition:opacity 1.6s ease;
+  }
+  #guideBar.dim{opacity:.14}
+  #guideBar:hover,#guideBar:focus-within{opacity:1;transition:opacity .35s ease}
+  #guideBtn{
+    display:flex;align-items:center;justify-content:center;gap:7px;width:100%;
+    padding:2px 0;font-size:9px;letter-spacing:.2em;text-transform:uppercase;
+    font-weight:300;color:var(--mist-dim);transition:color .3s;
+  }
+  #guideBtn:hover{color:var(--mist)}
+  #guideBtn .car{
+    display:inline-block;font-size:8px;line-height:1;
+    transition:transform .4s cubic-bezier(.2,.8,.2,1);
+  }
+  #guideBtn[aria-expanded="true"] .car{transform:rotate(180deg)}
+  #guideWrap{
+    display:grid;grid-template-rows:0fr;
+    transition:grid-template-rows .45s cubic-bezier(.2,.8,.2,1);
+  }
+  #guideWrap.open{grid-template-rows:1fr}
+  #guide{overflow:hidden;min-height:0}
+  #guideInner{
+    padding:12px 2px 2px;
+    font-size:11px;line-height:1.6;color:rgba(174,185,216,.72);font-weight:300;
+  }
+  #guideInner p{margin-bottom:10px}
+  #guideInner p:last-child{margin-bottom:0}
+  #guideInner dl{margin-bottom:10px}
+  #guideInner dt{
+    font-size:9px;letter-spacing:.18em;text-transform:uppercase;
+    color:rgba(233,239,255,.82);margin-top:8px;
+  }
+  #guideInner dt:first-child{margin-top:0}
+  #guideInner dd{margin-left:0}
+  #guideInner em{
+    font-family:var(--display);font-style:italic;font-size:13px;
+    color:rgba(233,239,255,.8);
+  }
+
   @media (max-height:660px){
-    #stage{width:min(58vw,240px)}
+    #stage{height:min(58vw,240px)}
     #controls{gap:14px}
   }
   @media (prefers-reduced-motion:reduce){
@@ -216,6 +259,26 @@
   <span>Cadence</span>
   <span id="stats">0 breaths · 0:00</span>
 </header>
+
+<div id="guideBar">
+  <button id="guideBtn" type="button" aria-expanded="false" aria-controls="guide">
+    How to breathe with it <span class="car" aria-hidden="true">▾</span>
+  </button>
+  <div id="guideWrap"><div id="guide" role="region" aria-label="How to breathe with it"><div id="guideInner">
+    <p>One breath, four parts, on a loop — follow the circle, or close your eyes and follow the tone.</p>
+    <dl>
+      <dt>Inhale</dt>
+      <dd>Draw air in steadily through your nose, still filling as the circle reaches its widest.</dd>
+      <dt>Hold</dt>
+      <dd>Keep the air in with your throat open and your shoulders down — holding is not bracing.</dd>
+      <dt>Exhale</dt>
+      <dd>Let it out slowly and evenly, emptying further than feels automatic.</dd>
+      <dt>Rest</dt>
+      <dd>Stay empty and wait out the count before the next inhale — the part most people skip.</dd>
+    </dl>
+    <p>A <em>0</em> in a pattern removes that phase. If you feel lightheaded, shorten the counts.</p>
+  </div></div></div>
+</div>
 
 <main>
   <div id="stage">
@@ -537,6 +600,7 @@
     initAudio();
     if (ctx.state === "suspended") ctx.resume();
     clearTimeout(previewTimer); previewing = false;
+    openGuide(false);
     buildPhases(); drawDial();
     running = true; idx = 0;
     phaseStart = lastTick = performance.now();
@@ -553,14 +617,19 @@
     hushAudio();
     toggleBtn.textContent = "Begin";
     controls.classList.remove("dim");
+    $("guideBar").classList.remove("dim");
     clearTimeout(idleTimer);
     highlight();
     idle();
   }
   function nudge(){
     controls.classList.remove("dim");
+    $("guideBar").classList.remove("dim");
     clearTimeout(idleTimer);
-    if (running) idleTimer = setTimeout(()=>controls.classList.add("dim"), 12000);
+    if (running) idleTimer = setTimeout(()=>{
+      controls.classList.add("dim");
+      $("guideBar").classList.add("dim");
+    }, 12000);
   }
 
   /* ---------------- controls ---------------- */
@@ -631,6 +700,15 @@
     $("w1").style.opacity = $("w2").style.opacity = muted ? 0 : 1;
     if (ctx) master.gain.setTargetAtTime(muted ? 0 : vol()*.6, ctx.currentTime, .2);
   };
+
+  /* ---------------- guide ---------------- */
+  const guideBtn = $("guideBtn"), guideWrap = $("guideWrap");
+  function openGuide(on){
+    guideWrap.classList.toggle("open", on);
+    guideBtn.setAttribute("aria-expanded", on);
+    nudge();
+  }
+  guideBtn.onclick = () => openGuide(!guideWrap.classList.contains("open"));
 
   /* ---------------- tone sheet ---------------- */
   const VOICES = [

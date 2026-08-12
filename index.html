@@ -152,7 +152,12 @@
   .step .adj:hover{color:var(--mist);border-color:rgba(174,185,216,.28);background:rgba(174,185,216,.05)}
   .step .adj:active{background:rgba(174,185,216,.12)}
 
-  #actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  /* transport leads the panel, anchored to the right — where the thumb rests */
+  #actions{
+    order:-1;
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    flex-direction:row-reverse;
+  }
   #toggle{
     flex:1 1 140px;min-width:0;
     height:46px;border:1px solid rgba(var(--c),.32);border-radius:999px;
@@ -265,6 +270,93 @@
   @media (max-height:660px){
     #controls{gap:14px}
     header{padding-top:14px}
+  }
+
+  /* ---------- landscape: orb one side, controls the other ---------- */
+  @media (orientation:landscape) and (max-height:620px){
+    body{
+      display:grid;
+      grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);
+      grid-template-rows:auto minmax(0,1fr) auto;
+      grid-template-areas:
+        "head  head"
+        "stage ctrl"
+        "guide ctrl";
+      padding-left:env(safe-area-inset-left);
+      padding-right:env(safe-area-inset-right);
+    }
+    header{grid-area:head;padding:12px 18px 0}
+    main{grid-area:stage;padding:6px 8px 2px 14px;position:relative}
+    /* hairline seam between the breath and the controls */
+    main::after{
+      content:"";position:absolute;right:0;top:5%;bottom:-16%;width:1px;
+      background:linear-gradient(180deg,
+        rgba(174,185,216,0) 0%,
+        rgba(174,185,216,.15) 24%,
+        rgba(174,185,216,.15) 76%,
+        rgba(174,185,216,0) 100%);
+    }
+    #stage{width:min(94cqmin,300px)}
+
+    #guideBar{
+      grid-area:guide;max-width:none;margin:0;
+      padding:0 14px calc(12px + env(safe-area-inset-bottom));
+    }
+
+    #controls{
+      grid-area:ctrl;
+      max-width:440px;margin-left:auto;align-self:center;
+      padding:8px 18px calc(12px + env(safe-area-inset-bottom));
+      gap:10px;min-height:0;overflow-y:auto;
+    }
+    #actions{margin-bottom:2px}
+    #presets{gap:5px}
+    .chip{padding:6px 9px;font-size:9px;letter-spacing:.14em}
+    .step{padding:6px 2px;border-radius:10px;gap:2px}
+    .step .val{font-size:17px}
+    #actions{flex-wrap:nowrap;gap:8px}
+    #toggle{height:42px;flex:1 1 auto;min-width:104px;letter-spacing:.24em}
+    #toneBtn{height:42px;padding:0 12px}
+    input[type=range]{width:52px}
+
+    /* sheets slide in from the side the controls live on, sized to fit without scrolling */
+    .sheet{
+      left:auto;right:0;top:0;bottom:0;
+      width:min(520px,76vw);max-width:none;max-height:none;margin:0;
+      border-radius:18px 0 0 18px;
+      border-top:none;border-left:1px solid var(--line);
+      padding:12px 18px calc(14px + env(safe-area-inset-bottom));
+      padding-right:calc(18px + env(safe-area-inset-right));
+      transform:translateX(103%);
+      display:flex;flex-direction:column;
+    }
+    .sheetTop{margin-bottom:6px;flex:none}
+
+    /* rows share the leftover height evenly, so the panel reads as one list */
+    #voices{gap:6px;margin-bottom:0;flex:none}
+    #toneGrid{flex:1;display:flex;flex-direction:column}
+    .tr{
+      flex:1 0 auto;padding:4px 0;column-gap:10px;row-gap:0;
+      align-content:center;
+    }
+    .tr .hint{margin-top:0;line-height:1.45}
+
+    /* term beside definition, not above it — half the rows, no scroll */
+    #guideInner{
+      font-size:11.5px;line-height:1.5;
+      flex:1;display:flex;flex-direction:column;
+    }
+    #guideInner p{margin-bottom:8px;flex:none}
+    /* the intro is a preamble, not a step — hold it off the list */
+    #guideInner p:first-child{margin-bottom:clamp(12px,5vh,26px)}
+    #guideInner p:last-child{margin-bottom:0}
+    #guideInner dl{
+      display:grid;grid-template-columns:auto minmax(0,1fr);
+      column-gap:14px;row-gap:6px;margin-bottom:8px;
+      flex:1;grid-auto-rows:minmax(min-content,1fr);align-items:start;
+    }
+    #guideInner dt{margin-top:0}
+    #guideInner em{font-size:13px}
   }
   @media (max-width:360px){
     #controls{padding-left:12px;padding-right:12px}

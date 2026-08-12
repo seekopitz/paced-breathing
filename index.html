@@ -476,8 +476,12 @@
   const IN_RGB = [127,216,222], OUT_RGB = [185,160,232];
 
   /* ---------------- state ---------------- */
-  let phases = [], running = false, idx = 0, phaseStart = 0,
-      breaths = 0, elapsed = 0, lastTick = 0, rafId = 0, idleTimer = 0;
+  let phases = [], running = false, idx = 0,
+      breaths = 0, elapsed = 0, elapsedBase = 0, runT0 = 0, rafId = 0, idleTimer = 0;
+
+  /* reassigning textContent rebuilds the text node and invalidates layout even
+     when the string is identical — at 60fps on a webfont that is not free */
+  const setText = (el, s) => { if (el.textContent !== s) el.textContent = s; };
 
   const fmt = n => (Math.round(n*10)/10).toString().replace(/\.0$/,"");
   const total = p => p.reduce((a,b)=>a+b,0);
@@ -487,11 +491,12 @@
   }
 
   /* ---------------- dial ---------------- */
-  function drawDial(){
-    const T = total(pattern), gap = 10;
+  function drawDial(phs, pat){
+    phs = phs || phases; pat = pat || pattern;
+    const T = total(pat), gap = 10;
     segsEl.innerHTML = "";
     let off = 0;
-    phases.forEach((ph,i) => {
+    phs.forEach((ph,i) => {
       const len = C * ph.dur / T;
       const draw = Math.max(len - gap, 1);
       const c = document.createElementNS("http://www.w3.org/2000/svg","circle");
@@ -517,14 +522,19 @@
     });
   }
 
-  /* ---------------- audio ---------------- */
-  let ctx=null, master=null, filt=null, oscMix=null, noiseBP=null, noiseGain=null,
-      voices=[], muted=false, previewing=false, previewTimer=0;
+  /* ---------------- audio ----------------
+     Every ramp is scheduled on the AudioContext clock at an absolute time that
+     is still ~a second in the future, from a timer that does not depend on rAF.
+     The main thread therefore never has to touch the graph at the instant a
+     phase turns over — which is exactly when it is busiest repainting. */
+  let ctx=null, master=null, outGain=null, filt=null, oscMix=null, noiseBP=null, noiseGain=null,
+      voices=[], muted=false, previewing=false, previewTimer=0, waveBody=-1;
 
   const TONE = { base:175, rise:7, body:16, breadth:20, air:0 };
   const ratio = () => Math.pow(2, TONE.rise/12);
   const vol = () => muted ? 0 : (+volEl.value/100) * 0.16;
   const SPREAD = [0,-1,1];
+  const ENV = { in:1, hold1:.75, out:.10, hold2:.05 };   // breath envelope, normalised
 
   /* harmonic series: body 0 = pure sine, body 100 = reedy */
   function makeWave(){
@@ -550,9 +560,19 @@
 
   function initAudio(){
     if (ctx) return;
-    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    /* "playback" asks for the largest render buffer the device will give us.
+       Nothing here needs low latency, and that headroom is what keeps a busy
+       frame from underrunning the output. */
+    try { ctx = new AC({latencyHint:"playback"}); } catch(e){ ctx = new AC(); }
+
+    outGain = ctx.createGain(); outGain.gain.value = vol();
+    outGain.connect(ctx.destination);
+
+    /* master carries the breath envelope only, 0..1 — user volume lives
+       downstream so moving the slider can never disturb a scheduled ramp */
     master = ctx.createGain(); master.gain.value = 0;
-    master.connect(ctx.destination);
+    master.connect(outGain);
 
     filt = ctx.createBiquadFilter(); filt.type = "lowpass";
     filt.frequency.value = TONE.base*2.4; filt.Q.value = .4;
@@ -580,15 +600,22 @@
     src.connect(noiseBP); noiseBP.connect(noiseGain); noiseGain.connect(master);
     src.start();
 
+    waveBody = TONE.body;
     applyTone();
   }
 
   /* live-updates the character of the tone without interrupting it */
   function applyTone(){
     if (!ctx) return;
-    const t = ctx.currentTime, wave = makeWave(), w = TONE.breadth/100;
+    const t = ctx.currentTime, w = TONE.breadth/100;
+    /* setPeriodicWave resets each oscillator's phase, so only rebuild the
+       wavetable when Body actually moved */
+    if (waveBody !== TONE.body){
+      waveBody = TONE.body;
+      const wave = makeWave();
+      voices.forEach(v => v.o.setPeriodicWave(wave));
+    }
     voices.forEach((v,i) => {
-      v.o.setPeriodicWave(wave);
       v.o.detune.setTargetAtTime(SPREAD[i] * w * 42, t, .08);
       if (v.p) v.p.pan.setTargetAtTime(SPREAD[i] * w * .85, t, .08);
       v.g.gain.setTargetAtTime(i===0 ? 1 : .06 + w*.55, t, .08);
@@ -597,30 +624,47 @@
     noiseGain.gain.setTargetAtTime(Math.pow(TONE.air/100, 1.4) * 2.2, t, .12);
   }
 
-  function voice(key, dur){
-    if (!ctx) return;
-    const t = ctx.currentTime, v = vol(), lo = TONE.base, hi = lo * ratio();
-    const glide = (param, target) => {
-      param.cancelScheduledValues(t);
-      param.setValueAtTime(Math.max(param.value, .0001), t);
-      param.exponentialRampToValueAtTime(Math.max(target, .0001), t + dur);
-    };
-    master.gain.cancelScheduledValues(t);
-    master.gain.setValueAtTime(Math.max(master.gain.value, .0001), t);
+  function cancelAt(param, t){
+    const hold = param.cancelAndHoldAtTime || param.cancelValuesAndHoldAtTime;
+    if (hold) { hold.call(param, t); return; }
+    const v = param.value;
+    param.cancelScheduledValues(t);
+    param.setValueAtTime(v, t);
+  }
 
-    if (key === "in"){
-      voices.forEach(x => glide(x.o.frequency, hi));
-      glide(filt.frequency, lo*8); glide(noiseBP.frequency, lo*7);
-      master.gain.linearRampToValueAtTime(v, t + dur);
-    } else if (key === "out"){
-      voices.forEach(x => glide(x.o.frequency, lo));
-      glide(filt.frequency, lo*2.4); glide(noiseBP.frequency, lo*2.4);
-      master.gain.linearRampToValueAtTime(v * .10, t + dur);
-    } else if (key === "hold1"){
-      master.gain.linearRampToValueAtTime(v * .75, t + Math.min(dur,.6));
+  /* Where each ramped param will sit at the next phase boundary. Anchoring the
+     next ramp from this model instead of reading param.value is what makes the
+     schedule independent of when the main thread happens to run: a late or
+     early wake-up can no longer snap a param to a stale value mid-glide. */
+  let level = null;
+  function resetLevels(){
+    const lo = TONE.base;
+    level = { env:0, freq:lo, filt:lo*2.4, nbp:lo*2.4 };
+  }
+
+  /* queues one phase's worth of ramps, starting at absolute audio time t */
+  function schedVoice(key, dur, t){
+    if (!ctx) return;
+    const lo = TONE.base, hi = lo * ratio();
+    const glide = (param, from, to) => {
+      param.setValueAtTime(Math.max(from, .0001), t);
+      param.exponentialRampToValueAtTime(Math.max(to, .0001), t + dur);
+    };
+    master.gain.setValueAtTime(level.env, t);
+
+    if (key === "in" || key === "out"){
+      const f  = key === "in" ? hi     : lo;
+      const ff = key === "in" ? lo*8   : lo*2.4;
+      const nf = key === "in" ? lo*7   : lo*2.4;
+      voices.forEach(x => glide(x.o.frequency, level.freq, f));
+      glide(filt.frequency, level.filt, ff);
+      glide(noiseBP.frequency, level.nbp, nf);
+      level.freq = f; level.filt = ff; level.nbp = nf;
+      master.gain.linearRampToValueAtTime(ENV[key], t + dur);
     } else {
-      master.gain.linearRampToValueAtTime(v * .05, t + Math.min(dur,.6));
+      master.gain.linearRampToValueAtTime(ENV[key], t + Math.min(dur,.6));
     }
+    level.env = ENV[key];
   }
 
   /* audition the current tone while paused */
@@ -634,9 +678,8 @@
     noiseBP.frequency.setTargetAtTime(TONE.base*4.5, t, .12);
     if (!previewing){
       previewing = true;
-      master.gain.cancelScheduledValues(t);
-      master.gain.setValueAtTime(master.gain.value, t);
-      master.gain.linearRampToValueAtTime(vol() * .9, t + .5);
+      cancelAt(master.gain, t);
+      master.gain.linearRampToValueAtTime(.9, t + .5);
     }
     clearTimeout(previewTimer);
     previewTimer = setTimeout(endPreview, 1900);
@@ -646,33 +689,44 @@
     if (!ctx || !previewing) return;
     previewing = false;
     const t = ctx.currentTime;
-    master.gain.cancelScheduledValues(t);
-    master.gain.setValueAtTime(master.gain.value, t);
+    cancelAt(master.gain, t);
     master.gain.linearRampToValueAtTime(0, t + .9);
   }
 
   function hushAudio(){
     if (!ctx) return;
     const t = ctx.currentTime;
-    master.gain.cancelScheduledValues(t);
-    master.gain.setValueAtTime(master.gain.value, t);
+    cancelAt(master.gain, t);
+    voices.forEach(x => cancelAt(x.o.frequency, t));
+    cancelAt(filt.frequency, t); cancelAt(noiseBP.frequency, t);
     master.gain.linearRampToValueAtTime(0, t + .5);
   }
 
   /* ---------------- render ---------------- */
   const ease = p => (1 - Math.cos(Math.PI * Math.min(Math.max(p,0),1))) / 2;
 
+  let lastTint = -1, lastDot = -1;
   function paint(fullness, cycleProg, showDot){
     const s = SCALE_MIN + (SCALE_MAX - SCALE_MIN) * fullness;
     orb.style.transform = `scale(${s.toFixed(4)})`;
     bloom.style.transform = `scale(${(s*1.35).toFixed(4)})`;
-    const c = IN_RGB.map((v,i)=>Math.round(v + (OUT_RGB[i]-v) * (1-fullness)));
-    document.documentElement.style.setProperty("--c", c.join(","));
+
+    /* --c repaints a 26px-blurred gradient, so step the tint rather than
+       writing a new colour every frame. 32 steps across a phase is below the
+       eye's threshold through that much blur and cuts the repaints ~8x. */
+    const q = Math.round(fullness * 32);
+    if (q !== lastTint){
+      lastTint = q;
+      const f = q/32, c = IN_RGB.map((v,i)=>Math.round(v + (OUT_RGB[i]-v) * (1-f))).join(",");
+      document.documentElement.style.setProperty("--c", c);
+      dotEl.setAttribute("fill", `rgb(${c})`);
+    }
+
     const a = (cycleProg * 2 * Math.PI) - Math.PI/2;
     dotEl.setAttribute("cx", (200 + R*Math.cos(a)).toFixed(2));
     dotEl.setAttribute("cy", (200 + R*Math.sin(a)).toFixed(2));
-    dotEl.setAttribute("opacity", showDot ? .9 : 0);
-    dotEl.setAttribute("fill", `rgb(${c.join(",")})`);
+    const o = showDot ? .9 : 0;
+    if (o !== lastDot){ lastDot = o; dotEl.setAttribute("opacity", o); }
   }
 
   function idle(){
@@ -681,42 +735,74 @@
     countEl.textContent = `${fmt(total(pattern))}s cycle`;
   }
 
-  function frame(now){
+  /* ---------------- schedule ----------------
+     One timeline, built ahead of the audio clock, that the synth and the
+     renderer both read from. The synth consumes it early (LOOKAHEAD seconds
+     out); the renderer consumes it as it happens. Neither drives the other. */
+  const LOOKAHEAD = 1.2, SCHED_MS = 220;
+  let timeline = [], schedT = 0, schedI = 0, schedCycle = 0, schedTimer = 0,
+      curItem = null, drawnSig = "";
+
+  function pushPhase(){
+    if (schedI >= phases.length){
+      schedI = 0; schedCycle++;
+      if (pending){ pattern = pending; pending = null; buildPhases(); }
+    }
+    const ph = phases[schedI];
+    let before = 0;
+    for (let i = 0; i < schedI; i++) before += phases[i].dur;
+    timeline.push({
+      key:ph.key, dur:ph.dur, t0:schedT, i:schedI, cycle:schedCycle,
+      before, cycleLen:total(pattern),
+      /* snapshot, so the dial redraws with the pattern this phase belongs to
+         and not one the scheduler has already moved on to */
+      sig:pattern.join(","), pat:pattern.slice(), phs:phases.slice()
+    });
+    schedVoice(ph.key, ph.dur, schedT);
+    schedT += ph.dur;
+    schedI++;
+  }
+
+  function pump(){
+    if (!running || !ctx) return;
+    const horizon = ctx.currentTime + LOOKAHEAD;
+    let guard = 64;
+    while (schedT < horizon && guard-- > 0) pushPhase();
+    while (timeline.length > 1 && timeline[1].t0 <= ctx.currentTime) timeline.shift();
+  }
+
+  /* ---------------- render ---------------- */
+  function frame(){
     if (!running) return;
-    const ph = phases[idx];
-    let t = (now - phaseStart) / 1000;
+    rafId = requestAnimationFrame(frame);
+    const it0 = timeline[0];
+    if (!it0) return;
 
-    if (t > ph.dur * 2 + 4) { phaseStart = now; t = 0; }   // returned from a backgrounded tab
-
-    if (t >= ph.dur){
-      phaseStart += ph.dur * 1000;
-      idx++;
-      if (idx >= phases.length){
-        idx = 0; breaths++;
-        if (pending){ pattern = pending; pending = null; buildPhases(); drawDial(); }
-      }
-      highlight();
-      const next = phases[idx];
-      phaseEl.textContent = WORDS[next.key];
-      voice(next.key, next.dur);
-      return (rafId = requestAnimationFrame(frame));
+    const now = ctx.currentTime;
+    let it = it0;
+    for (let i = 1; i < timeline.length; i++){
+      if (timeline[i].t0 <= now) it = timeline[i]; else break;
     }
 
-    elapsed += (now - lastTick) / 1000; lastTick = now;
-    const p = t / ph.dur;
-    const fullness = ph.key === "in" ? ease(p)
-                   : ph.key === "out" ? 1 - ease(p)
-                   : ph.key === "hold1" ? 1 : 0;
+    if (it !== curItem){
+      if (curItem && it.cycle !== curItem.cycle) breaths++;
+      curItem = it;
+      idx = it.i;
+      if (it.sig !== drawnSig){ drawnSig = it.sig; drawDial(it.phs, it.pat); }
+      else highlight();
+      setText(phaseEl, WORDS[it.key]);
+    }
 
-    let before = 0;
-    for (let i = 0; i < idx; i++) before += phases[i].dur;
-    paint(fullness, (before + t) / total(pattern), true);
+    const t = Math.min(Math.max(now - it.t0, 0), it.dur), p = t / it.dur;
+    const fullness = it.key === "in" ? ease(p)
+                   : it.key === "out" ? 1 - ease(p)
+                   : it.key === "hold1" ? 1 : 0;
+    paint(fullness, (it.before + t) / it.cycleLen, true);
 
-    countEl.textContent = Math.ceil(ph.dur - t - .001);
+    setText(countEl, String(Math.max(0, Math.ceil(it.dur - t - .001))));
+    elapsed = elapsedBase + Math.max(0, now - runT0);
     const m = Math.floor(elapsed/60), s = Math.floor(elapsed%60);
-    statsEl.textContent = `${breaths} breath${breaths===1?"":"s"} · ${m}:${String(s).padStart(2,"0")}`;
-
-    rafId = requestAnimationFrame(frame);
+    setText(statsEl, `${breaths} breath${breaths===1?"":"s"} · ${m}:${String(s).padStart(2,"0")}`);
   }
 
   /* ---------------- transport ---------------- */
@@ -725,19 +811,34 @@
     if (ctx.state === "suspended") ctx.resume();
     clearTimeout(previewTimer); previewing = false;
     openGuide(false);
-    buildPhases(); drawDial();
+    buildPhases();
+
+    /* start a beat into the future: gives the scheduler a head start and lets
+       any preview tail land on silence instead of being cut off */
+    const t0 = ctx.currentTime + .15;
+    cancelAt(master.gain, ctx.currentTime);
+    master.gain.linearRampToValueAtTime(0, t0);
+    resetLevels();
+
+    timeline = []; curItem = null;
+    schedI = 0; schedCycle = 0; schedT = t0;
+    runT0 = t0; elapsedBase = elapsed;
     running = true; idx = 0;
-    phaseStart = lastTick = performance.now();
+
+    drawnSig = pattern.join(","); drawDial();
     toggleBtn.textContent = "Pause";
-    phaseEl.textContent = WORDS[phases[0].key];
-    voice(phases[0].key, phases[0].dur);
-    highlight();
+    setText(phaseEl, WORDS[phases[0].key]);
+    pump();
+    clearInterval(schedTimer);
+    schedTimer = setInterval(pump, SCHED_MS);
     rafId = requestAnimationFrame(frame);
     nudge();
   }
   function stop(){
     running = false;
     cancelAnimationFrame(rafId);
+    clearInterval(schedTimer);
+    timeline = []; curItem = null;
     hushAudio();
     toggleBtn.textContent = "Begin";
     controls.classList.remove("dim");
@@ -814,7 +915,7 @@
 
   volEl.oninput = () => {
     if (muted){ muted = false; muteBtn.classList.add("on"); muteBtn.setAttribute("aria-pressed","false"); }
-    if (ctx && running) master.gain.setTargetAtTime(vol()*.6, ctx.currentTime, .3);
+    if (ctx) outGain.gain.setTargetAtTime(vol(), ctx.currentTime, .05);
   };
   muteBtn.onclick = () => {
     muted = !muted;
@@ -822,7 +923,7 @@
     muteBtn.setAttribute("aria-pressed", muted);
     muteBtn.setAttribute("aria-label", muted ? "Unmute tone" : "Mute tone");
     $("w1").style.opacity = $("w2").style.opacity = muted ? 0 : 1;
-    if (ctx) master.gain.setTargetAtTime(muted ? 0 : vol()*.6, ctx.currentTime, .2);
+    if (ctx) outGain.gain.setTargetAtTime(vol(), ctx.currentTime, .05);
   };
 
   /* ---------------- guide ---------------- */

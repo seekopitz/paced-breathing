@@ -75,11 +75,20 @@
     width:74%;aspect-ratio:1;border-radius:50%;
     will-change:transform;
   }
-  #bloom{
-    background:radial-gradient(circle,rgba(var(--c),.30) 0%,rgba(var(--c),.06) 45%,rgba(var(--c),0) 70%);
-    filter:blur(26px);
-    transform:scale(1.4);
+  /* Two pre-blurred halos cross-faded by opacity. The 26px blur is rasterised
+     once per layer instead of re-run on every tint step, and opacity is a
+     compositor property, so the breath costs this element no repaints at all.
+     Stacking two translucent layers doesn't composite to exactly the
+     interpolated colour, but at .30 alpha the error peaks near 2% — invisible
+     through this much blur. The orb keeps a real gradient repaint, where that
+     error would show and the 1.5px blur is nearly free. */
+  #bloom{transform:scale(1.4)}
+  #bloom .lay{
+    position:absolute;inset:0;border-radius:50%;
+    filter:blur(26px);will-change:opacity;
   }
+  #bloom .a{background:radial-gradient(circle,rgba(var(--in),.30) 0%,rgba(var(--in),.06) 45%,rgba(var(--in),0) 70%)}
+  #bloom .b{background:radial-gradient(circle,rgba(var(--out),.30) 0%,rgba(var(--out),.06) 45%,rgba(var(--out),0) 70%)}
   #orb{
     background:radial-gradient(circle at 50% 44%,
       rgba(var(--c),.92) 0%,
@@ -91,7 +100,9 @@
   }
   #dial{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
   #dial .seg{fill:none;stroke-linecap:round;transition:opacity .5s ease,stroke-width .5s ease}
-  #dot{transition:opacity .6s ease}
+  /* fill from --c, which now lives on #stage — saves an attribute write per
+     tint step and keeps the dot in the same invalidation scope as the orb */
+  #dot{transition:opacity .6s ease;fill:rgb(var(--c))}
 
   #center{position:relative;text-align:center;pointer-events:none;padding:0 8%;max-width:100%}
   #phase{
@@ -431,7 +442,7 @@
 <body>
 
 <header>
-  <span>Cadence<span id="ver">2026.08.12.2004</span></span>
+  <span>Cadence<span id="ver">2026.08.12.2030</span></span>
   <span id="stats">0 breaths · 0:00</span>
 </header>
 
@@ -443,7 +454,7 @@
 
 <main>
   <div id="stage">
-    <div id="bloom"></div>
+    <div id="bloom"><div class="lay a"></div><div class="lay b"></div></div>
     <div id="orb"></div>
     <svg id="dial" viewBox="0 0 400 400" aria-hidden="true">
       <g id="segs" transform="rotate(-90 200 200)"></g>
@@ -535,7 +546,9 @@
 
   /* ---------------- elements ---------------- */
   const $ = id => document.getElementById(id);
-  const orb=$("orb"), bloom=$("bloom"), phaseEl=$("phase"), countEl=$("count"),
+  const orb=$("orb"), bloom=$("bloom"), stage=$("stage"),
+        bloomA=bloom.querySelector(".a"), bloomB=bloom.querySelector(".b"),
+        phaseEl=$("phase"), countEl=$("count"),
         statsEl=$("stats"), segsEl=$("segs"), dotEl=$("dot"),
         toggleBtn=$("toggle"), controls=$("controls"), volEl=$("vol"), muteBtn=$("mute");
 
@@ -604,6 +617,8 @@
      you last tapped "I heard a skip", so a mark reports its own neighbourhood
      rather than the whole session's worst. */
   const DBG = (() => {
+    const FLAG = n => new RegExp("[?&#]" + n).test(location.search + location.hash);
+    const NOPROBE = FLAG("noprobe");
     const zero = () => ({slackMin:Infinity, pumpMax:0, frameMax:0, jank:0, glitch:0, glitchMs:0});
     let life = zero(), win = zero(), pumps = 0, frames = 0;
     const states = [], marks = [];
@@ -644,7 +659,11 @@ registerProcessor("glitch-probe", GlitchProbe);`;
       note(c.state);
       c.addEventListener("statechange", () => { note(c.state); render(); });
 
-      if (c.audioWorklet && window.Blob && window.URL){
+      /* ?noprobe leaves the worklet off entirely. Chrome moves graph rendering
+         onto the worklet thread once one exists, so the probe is not perfectly
+         inert — this is the A/B that rules it in or out. */
+      if (NOPROBE) probe = "off (noprobe)";
+      else if (c.audioWorklet && window.Blob && window.URL){
         probe = "loading";
         const url = URL.createObjectURL(new Blob([PROBE_SRC], {type:"application/javascript"}));
         c.audioWorklet.addModule(url).then(() => {
@@ -656,6 +675,7 @@ registerProcessor("glitch-probe", GlitchProbe);`;
         }).catch(() => { probe = "unavailable"; })
           .then(() => { try { URL.revokeObjectURL(url); } catch(e){} });
       } else probe = "unsupported";
+
 
       /* Chrome-only, but authoritative about underruns where it exists */
       try {
@@ -680,9 +700,7 @@ registerProcessor("glitch-probe", GlitchProbe);`;
     }
 
     function onPump(slack){
-      /* the first pump of a run measures the 0.15s head start start() builds
-         in, not starvation — sampling it would peg the minimum there forever */
-      if (pumps++) least("slackMin", slack);
+      pumps++; least("slackMin", slack);
       const t = performance.now();
       if (lastPump) worst("pumpMax", t - lastPump);
       lastPump = t;
@@ -956,15 +974,23 @@ registerProcessor("glitch-probe", GlitchProbe);`;
     orb.style.transform = `scale(${s.toFixed(4)})`;
     bloom.style.transform = `scale(${(s*1.35).toFixed(4)})`;
 
-    /* --c repaints a 26px-blurred gradient, so step the tint rather than
-       writing a new colour every frame. 32 steps across a phase is below the
-       eye's threshold through that much blur and cuts the repaints ~8x. */
+    /* The bloom is now a compositor-only cross-fade, so what is left here is
+       the orb's gradient — cheap, but still a repaint, so keep stepping the
+       tint. 32 steps across a phase is below the eye's threshold.
+
+       --c goes on #stage, never on :root. On :root it invalidated style for
+       the whole document, and because #toggle and .chip declare
+       `transition:background` it also restarted a 350ms colour transition on
+       the button and every preset chip 8 times a second — those elements were
+       repainting continuously for the entire session. */
     const q = Math.round(fullness * 32);
     if (q !== lastTint){
       lastTint = q;
-      const f = q/32, c = IN_RGB.map((v,i)=>Math.round(v + (OUT_RGB[i]-v) * (1-f))).join(",");
-      document.documentElement.style.setProperty("--c", c);
-      dotEl.setAttribute("fill", `rgb(${c})`);
+      const f = q/32;
+      bloomA.style.opacity = f.toFixed(3);
+      bloomB.style.opacity = (1 - f).toFixed(3);
+      stage.style.setProperty("--c",
+        IN_RGB.map((v,i)=>Math.round(v + (OUT_RGB[i]-v) * (1-f))).join(","));
     }
 
     const a = (cycleProg * 2 * Math.PI) - Math.PI/2;
@@ -983,10 +1009,16 @@ registerProcessor("glitch-probe", GlitchProbe);`;
   /* ---------------- schedule ----------------
      One timeline, built ahead of the audio clock, that the synth and the
      renderer both read from. The synth consumes it early (LOOKAHEAD seconds
-     out); the renderer consumes it as it happens. Neither drives the other. */
-  const LOOKAHEAD = 1.2, SCHED_MS = 220;
+     out); the renderer consumes it as it happens. Neither drives the other.
+
+     The horizon is deliberately far past what the ear needs. Every ramp is
+     already absolute-time and every anchor is modelled in `level`, so depth
+     costs nothing at runtime — a few dozen queued events — and it is the only
+     thing that makes a multi-second main-thread stall inaudible. Changes then
+     land by rewinding the schedule (see replan) rather than by waiting. */
+  const LOOKAHEAD = 10, SCHED_MS = 1000, REPLAN_LEAD = .3;
   let timeline = [], schedT = 0, schedI = 0, schedCycle = 0, schedTimer = 0,
-      curItem = null, drawnSig = "";
+      curItem = null, drawnSig = "", replanTimer = 0;
 
   function pushPhase(){
     if (schedI >= phases.length){
@@ -1001,7 +1033,11 @@ registerProcessor("glitch-probe", GlitchProbe);`;
       before, cycleLen:total(pattern),
       /* snapshot, so the dial redraws with the pattern this phase belongs to
          and not one the scheduler has already moved on to */
-      sig:pattern.join(","), pat:pattern.slice(), phs:phases.slice()
+      sig:pattern.join(","), pat:pattern.slice(), phs:phases.slice(),
+      /* the param anchors as they stand entering this phase — replan rewinds
+         `level` to one of these, which is what lets the schedule be rebuilt
+         from a boundary without reading any live param value */
+      lvl:{...level}
     });
     schedVoice(ph.key, ph.dur, schedT);
     schedT += ph.dur;
@@ -1011,11 +1047,61 @@ registerProcessor("glitch-probe", GlitchProbe);`;
   function pump(){
     if (!running || !ctx) return;
     const horizon = ctx.currentTime + LOOKAHEAD;
-    DBG.onPump(schedT - ctx.currentTime);
     let guard = 64;
     while (schedT < horizon && guard-- > 0) pushPhase();
     while (timeline.length > 1 && timeline[1].t0 <= ctx.currentTime) timeline.shift();
   }
+
+  /* Rewinds the schedule to a boundary just ahead of the ear and rebuilds from
+     there. With a 10s horizon a queued change would otherwise be inaudible for
+     up to 10s; this makes it land in REPLAN_LEAD instead — sooner than the old
+     1.2s horizon managed, not later.
+
+       cycleOnly  pattern changes, which must still take effect on a whole
+                  breath. Tone changes cut at any phase boundary.
+
+     Cancelling at t0 exactly would delete the *previous* phase's ramp, which
+     is the event that lands on t0 and is very likely mid-glide right now —
+     an audible snap. Cancelling 1ms later keeps it and drops only what starts
+     at the boundary; schedVoice re-anchors those to identical values. */
+  function replan(cycleOnly){
+    if (!running || !ctx || !level) return;
+    const cut = ctx.currentTime + REPLAN_LEAD;
+    let k = -1;
+    for (let i = 1; i < timeline.length; i++){
+      const it = timeline[i];
+      if (it.t0 >= cut && (!cycleOnly || it.i === 0)){ k = i; break; }
+    }
+    /* nothing suitable queued yet — pushPhase will pick the change up on its
+       own when it gets there, which is the correct time anyway */
+    if (k < 0) return;
+
+    const t = timeline[k].t0, e = t + .001;
+    master.gain.cancelScheduledValues(e);
+    voices.forEach(x => x.o.frequency.cancelScheduledValues(e));
+    filt.frequency.cancelScheduledValues(e);
+    noiseBP.frequency.cancelScheduledValues(e);
+
+    level = {...timeline[k].lvl};
+    schedT = t;
+    if (cycleOnly){
+      /* leave the scheduler one step short of a wrap so pushPhase applies
+         `pending` through the same path it always has */
+      schedCycle = timeline[k-1].cycle;
+      schedI = phases.length;
+    } else {
+      schedCycle = timeline[k].cycle;
+      schedI = timeline[k].i;
+    }
+    timeline.length = k;
+    pump();
+  }
+  /* sliders fire continuously; rebuilding the schedule per event would be its
+     own source of jank */
+  const replanSoon = () => {
+    clearTimeout(replanTimer);
+    replanTimer = setTimeout(() => replan(false), 200);
+  };
 
   /* ---------------- render ---------------- */
   function frame(){
@@ -1078,7 +1164,14 @@ registerProcessor("glitch-probe", GlitchProbe);`;
     setText(phaseEl, WORDS[phases[0].key]);
     pump();
     clearInterval(schedTimer);
-    schedTimer = setInterval(pump, SCHED_MS);
+    /* slack is sampled here rather than inside pump(): the question it answers
+       is how much runway was left when the periodic wake-up got its turn, and
+       start() and replan() both call pump() straight after rewinding schedT,
+       which would otherwise read as starvation */
+    schedTimer = setInterval(() => {
+      if (running && ctx) DBG.onPump(schedT - ctx.currentTime);
+      pump();
+    }, SCHED_MS);
     rafId = requestAnimationFrame(frame);
     nudge();
   }
@@ -1086,6 +1179,7 @@ registerProcessor("glitch-probe", GlitchProbe);`;
     running = false;
     cancelAnimationFrame(rafId);
     clearInterval(schedTimer);
+    clearTimeout(replanTimer);
     timeline = []; curItem = null;
     hushAudio();
     toggleBtn.textContent = "Begin";
@@ -1155,7 +1249,7 @@ registerProcessor("glitch-probe", GlitchProbe);`;
 
   function applyPattern(p){
     KEYS.forEach((_,i) => valEls[i].textContent = fmt(p[i]));
-    if (running){ pending = p; }                 // takes effect at the next full breath
+    if (running){ pending = p; replan(true); }   // takes effect at the next full breath
     else { pattern = p; buildPhases(); drawDial(); idle(); }
   }
 
@@ -1228,7 +1322,9 @@ registerProcessor("glitch-probe", GlitchProbe);`;
       TONE[s.k] = +inp.value;
       out.textContent = s.out(TONE[s.k]);
       applyTone();
-      if (!running) preview();
+      /* pitch and rise are baked into the queued ramps, so a live change has
+         to rewind the schedule or it would not be heard for a whole horizon */
+      if (running) replanSoon(); else preview();
       markVoice();
     });
     $("toneGrid").appendChild(row);
@@ -1242,7 +1338,9 @@ registerProcessor("glitch-probe", GlitchProbe);`;
       Object.assign(TONE, v.t);
       SLIDERS.forEach(s => { inEls[s.k].value = TONE[s.k]; outEls[s.k].textContent = s.out(TONE[s.k]); });
       applyTone();
-      if (!running) preview();
+      /* pitch and rise are baked into the queued ramps, so a live change has
+         to rewind the schedule or it would not be heard for a whole horizon */
+      if (running) replanSoon(); else preview();
       markVoice();
     };
     $("voices").appendChild(b);

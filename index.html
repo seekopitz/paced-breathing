@@ -44,13 +44,15 @@
     color:var(--mist-dim);font-weight:300;
   }
   #stats{font-variant-numeric:tabular-nums;letter-spacing:.14em}
-  /* build stamp — deliberately faint; it is a diagnostic, not chrome.
-     Doubles as the diagnostics toggle, so it carries a thumb-sized hit box
-     that the negative margin keeps out of the header's layout. */
+  /* build stamp — deliberately faint; it is a diagnostic, not chrome */
   #ver{
     font-size:9px;letter-spacing:.08em;text-transform:none;
     font-variant-numeric:tabular-nums;
-    color:rgba(92,103,137,.55);
+    color:rgba(92,103,137,.55);margin-left:8px;
+  }
+  /* under ?debug only, the stamp becomes the panel toggle and needs a
+     thumb-sized hit box the negative margin keeps out of the layout */
+  #ver.tap{
     display:inline-block;cursor:pointer;
     padding:8px 10px;margin:-8px -10px -8px -2px;
     -webkit-tap-highlight-color:transparent;
@@ -442,7 +444,7 @@
 <body>
 
 <header>
-  <span>Cadence<span id="ver">2026.08.12.2030</span></span>
+  <span>Cadence<span id="ver">2026.08.12.2052</span></span>
   <span id="stats">0 breaths · 0:00</span>
 </header>
 
@@ -618,11 +620,15 @@
      rather than the whole session's worst. */
   const DBG = (() => {
     const FLAG = n => new RegExp("[?&#]" + n).test(location.search + location.hash);
-    const NOPROBE = FLAG("noprobe");
+    /* Off unless asked for. Without ?debug nothing here attaches, counts, or
+       renders: the hooks are swapped for no-ops below, so the shipped app pays
+       nothing — not even the worklet, which is not perfectly inert on Chrome.
+       ?debug&noprobe subtracts the worklet while keeping everything else. */
+    const ON = FLAG("debug"), NOPROBE = FLAG("noprobe");
     const zero = () => ({slackMin:Infinity, pumpMax:0, frameMax:0, jank:0, glitch:0, glitchMs:0});
     let life = zero(), win = zero(), pumps = 0, frames = 0;
     const states = [], marks = [];
-    let on = false, hold = false, actx = null, probe = "off", cap = null,
+    let shown = false, hold = false, actx = null, probe = "off", cap = null,
         lastPump = 0, lastFrame = 0, perfT0 = 0, audioT0 = 0, uiTimer = 0;
 
     /* runs on the audio thread: currentFrame advances by exactly one render
@@ -659,9 +665,9 @@ registerProcessor("glitch-probe", GlitchProbe);`;
       note(c.state);
       c.addEventListener("statechange", () => { note(c.state); render(); });
 
-      /* ?noprobe leaves the worklet off entirely. Chrome moves graph rendering
-         onto the worklet thread once one exists, so the probe is not perfectly
-         inert — this is the A/B that rules it in or out. */
+      /* Chrome moves graph rendering onto the worklet thread once one exists,
+         so the probe is not perfectly inert — ?noprobe is the A/B that rules
+         it in or out without giving up the rest of the panel. */
       if (NOPROBE) probe = "off (noprobe)";
       else if (c.audioWorklet && window.Blob && window.URL){
         probe = "loading";
@@ -751,7 +757,7 @@ registerProcessor("glitch-probe", GlitchProbe);`;
     }
 
     function render(){
-      if (!on) return;
+      if (!shown) return;
       $("dbgOut").textContent = lines().join("\n");
       $("dbgLog").textContent = marks.length
         ? marks.slice(-14).join("\n")
@@ -770,17 +776,22 @@ registerProcessor("glitch-probe", GlitchProbe);`;
     }
 
     function open(v){
-      on = v;
+      shown = v;
       $("dbg").classList.toggle("open", v);
       $("dbgTA").classList.remove("show");
       clearInterval(uiTimer);
       if (v){ render(); uiTimer = setInterval(render, 250); }
     }
 
-    return {
-      attach, reset, onPump, onFrame, mark, report, render,
-      open, toggle: () => open(!on), isOpen: () => on,
-      hold: () => hold, setHold: v => { hold = v; }
+    /* the hot hooks are swapped rather than branched, so the default build
+       calls an empty function instead of testing a flag every frame */
+    const noop = () => {};
+    return ON ? {
+      on:true, attach, reset, onPump, onFrame, mark, report, render,
+      open, toggle: () => open(!shown), hold: () => hold, setHold: v => { hold = v; }
+    } : {
+      on:false, attach:noop, reset:noop, onPump:noop, onFrame:noop,
+      hold: () => false
     };
   })();
 
@@ -1382,9 +1393,12 @@ registerProcessor("glitch-probe", GlitchProbe);`;
     if (document.hidden && running && !DBG.hold()) stop();
   });
 
-  /* ---------------- diagnostics panel ---------------- */
-  {
+  /* ---------------- diagnostics panel ----------------
+     Only built under ?debug. Otherwise the stamp stays a stamp and #dbg is
+     inert markup that never gets a listener. */
+  if (DBG.on) {
     const ver = $("ver");
+    ver.classList.add("tap");
     ver.setAttribute("role","button");
     ver.setAttribute("tabindex","0");
     ver.title = "Diagnostics";
@@ -1418,7 +1432,7 @@ registerProcessor("glitch-probe", GlitchProbe);`;
       else fallback();
     };
 
-    if (/[?&#]debug/.test(location.search + location.hash)) DBG.open(true);
+    DBG.open(true);
   }
 
   buildPhases(); drawDial(); idle();

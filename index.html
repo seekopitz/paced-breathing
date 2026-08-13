@@ -44,11 +44,16 @@
     color:var(--mist-dim);font-weight:300;
   }
   #stats{font-variant-numeric:tabular-nums;letter-spacing:.14em}
-  /* build stamp — deliberately faint; it is a diagnostic, not chrome */
+  /* build stamp — deliberately faint; it is a diagnostic, not chrome.
+     Doubles as the diagnostics toggle, so it carries a thumb-sized hit box
+     that the negative margin keeps out of the header's layout. */
   #ver{
     font-size:9px;letter-spacing:.08em;text-transform:none;
     font-variant-numeric:tabular-nums;
-    color:rgba(92,103,137,.55);margin-left:8px;
+    color:rgba(92,103,137,.55);
+    display:inline-block;cursor:pointer;
+    padding:8px 10px;margin:-8px -10px -8px -2px;
+    -webkit-tap-highlight-color:transparent;
   }
 
   /* ---------- stage ---------- */
@@ -273,6 +278,49 @@
     color:rgba(233,239,255,.85);
   }
 
+  /* ---------- diagnostics ---------- */
+  #dbg{
+    position:fixed;z-index:20;left:0;right:0;bottom:0;
+    display:none;
+    background:rgba(6,9,18,.96);border-top:1px solid var(--line);
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    max-height:74svh;overflow-y:auto;overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+  }
+  #dbg.open{display:block}
+  #dbgOut,#dbgLog{
+    font-size:10px;line-height:1.55;font-variant-numeric:tabular-nums;
+    white-space:pre-wrap;word-break:break-word;letter-spacing:.02em;
+  }
+  #dbgOut{color:rgba(233,239,255,.86)}
+  #dbgLog{
+    margin-top:9px;padding-top:9px;border-top:1px solid rgba(174,185,216,.1);
+    color:rgba(174,185,216,.6);max-height:24svh;overflow-y:auto;
+  }
+  #dbgBtns{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+  #dbgBtns button{
+    border:1px solid var(--line);border-radius:999px;
+    padding:0 13px;height:36px;
+    font-size:10px;letter-spacing:.16em;text-transform:uppercase;font-weight:300;
+    color:var(--mist-dim);-webkit-tap-highlight-color:transparent;
+  }
+  #dbgBtns button:active{background:rgba(174,185,216,.12)}
+  #dbgBtns button[aria-pressed="true"]{color:rgba(233,239,255,.95);border-color:rgba(var(--c),.5)}
+  /* the only control used mid-session — sized for a thumb, no aiming.
+     Selector matches #dbgBtns button's specificity or it loses the height. */
+  #dbgBtns #dbgMark{
+    flex:1 1 100%;height:54px;
+    border-color:rgba(var(--c),.45);background:rgba(var(--c),.08);
+    color:rgba(233,239,255,.95);letter-spacing:.24em;
+  }
+  #dbgTA{
+    display:none;width:100%;height:132px;margin-top:9px;
+    background:rgba(0,0,0,.4);color:var(--mist);
+    border:1px solid var(--line);border-radius:8px;padding:8px;
+    font:inherit;font-size:10px;
+  }
+  #dbgTA.show{display:block}
+
   @media (max-height:660px){
     #controls{gap:14px}
     header{padding-top:14px}
@@ -383,7 +431,7 @@
 <body>
 
 <header>
-  <span>Cadence<span id="ver">2026.08.12.1946</span></span>
+  <span>Cadence<span id="ver">2026.08.12.2004</span></span>
   <span id="stats">0 breaths · 0:00</span>
 </header>
 
@@ -447,6 +495,19 @@
   <div class="sheetTop"><span>Tone</span><button id="done" class="done" type="button">Done</button></div>
   <div id="voices" role="group" aria-label="Voice presets"></div>
   <div id="toneGrid"></div>
+</section>
+
+<section id="dbg" aria-label="Diagnostics">
+  <div id="dbgOut"></div>
+  <div id="dbgBtns">
+    <button id="dbgMark" type="button">I heard a skip</button>
+    <button id="dbgHold" type="button" aria-pressed="false">Keep running hidden</button>
+    <button id="dbgReset" type="button">Reset</button>
+    <button id="dbgCopy" type="button">Copy report</button>
+    <button id="dbgClose" type="button">Close</button>
+  </div>
+  <div id="dbgLog"></div>
+  <textarea id="dbgTA" readonly aria-label="Diagnostics report"></textarea>
 </section>
 
 <script>
@@ -528,6 +589,183 @@
     });
   }
 
+  /* ---------------- diagnostics ----------------
+     Instrumentation only. It answers one question: when the ear hears a skip,
+     which subsystem was late? The three failure modes are indistinguishable
+     from the outside, so each gets its own probe.
+
+       slack   seconds of audio already scheduled ahead of the clock. Only the
+               main-thread pump being starved can drive this toward 0.
+       glitch  an AudioWorklet watching for sample frames the render thread
+               skipped — an underrun, independent of anything the pump does.
+       frame   rAF deltas, i.e. plain main-thread jank.
+
+     Everything is counted twice: once for the run, once for the window since
+     you last tapped "I heard a skip", so a mark reports its own neighbourhood
+     rather than the whole session's worst. */
+  const DBG = (() => {
+    const zero = () => ({slackMin:Infinity, pumpMax:0, frameMax:0, jank:0, glitch:0, glitchMs:0});
+    let life = zero(), win = zero(), pumps = 0, frames = 0;
+    const states = [], marks = [];
+    let on = false, hold = false, actx = null, probe = "off", cap = null,
+        lastPump = 0, lastFrame = 0, perfT0 = 0, audioT0 = 0, uiTimer = 0;
+
+    /* runs on the audio thread: currentFrame advances by exactly one render
+       quantum per call unless the renderer missed its deadline and the output
+       moved on without it — the jump is the dropout, in frames */
+    const PROBE_SRC = `
+class GlitchProbe extends AudioWorkletProcessor {
+  constructor(){ super(); this.last = -1; }
+  process(){
+    const f = currentFrame;
+    if (this.last >= 0 && f - this.last > 128)
+      this.port.postMessage((f - this.last - 128) / sampleRate * 1000);
+    this.last = f;
+    return true;
+  }
+}
+registerProcessor("glitch-probe", GlitchProbe);`;
+
+    const bump  = (k,n) => { life[k]+=n; win[k]+=n; };
+    const worst = (k,v) => { if (v>life[k]) life[k]=v; if (v>win[k]) win[k]=v; };
+    const least = (k,v) => { if (v<life[k]) life[k]=v; if (v<win[k]) win[k]=v; };
+    const clock = () => actx ? actx.currentTime : 0;
+    const note  = s => { states.push(`${s}@${clock().toFixed(1)}`); if (states.length>14) states.shift(); };
+    /* positive = the audio clock fell behind the wall clock */
+    const drift = () => actx ? (performance.now()/1000 - perfT0) - (actx.currentTime - audioT0) : 0;
+    const ms = v => Math.round(v) + "ms";
+
+    function attach(c){
+      actx = c;
+      states.length = 0;
+      /* baseline the clocks here as well as in reset(), so the readout is
+         honest if the panel is opened before the first Begin */
+      perfT0 = performance.now()/1000; audioT0 = c.currentTime;
+      note(c.state);
+      c.addEventListener("statechange", () => { note(c.state); render(); });
+
+      if (c.audioWorklet && window.Blob && window.URL){
+        probe = "loading";
+        const url = URL.createObjectURL(new Blob([PROBE_SRC], {type:"application/javascript"}));
+        c.audioWorklet.addModule(url).then(() => {
+          const n = new AudioWorkletNode(c, "glitch-probe",
+            {numberOfInputs:0, numberOfOutputs:1, outputChannelCount:[1]});
+          n.port.onmessage = e => { bump("glitch",1); worst("glitchMs", e.data); };
+          n.connect(c.destination);          // outputs silence; exists to be pulled
+          probe = "on";
+        }).catch(() => { probe = "unavailable"; })
+          .then(() => { try { URL.revokeObjectURL(url); } catch(e){} });
+      } else probe = "unsupported";
+
+      /* Chrome-only, but authoritative about underruns where it exists */
+      try {
+        if (c.renderCapacity){
+          cap = {avg:0, peak:0, under:0};
+          c.renderCapacity.addEventListener("update", e => {
+            cap.avg = e.averageLoad;
+            cap.peak = Math.max(cap.peak, e.peakLoad);
+            cap.under = Math.max(cap.under, e.underrunRatio);
+          });
+          c.renderCapacity.start({updateInterval:1});
+        }
+      } catch(e){}
+    }
+
+    function reset(){
+      life = zero(); win = zero(); pumps = 0; frames = 0;
+      marks.length = 0; lastPump = 0; lastFrame = 0;
+      if (cap) cap = {avg:0, peak:0, under:0};
+      perfT0 = performance.now()/1000; audioT0 = clock();
+      render();
+    }
+
+    function onPump(slack){
+      /* the first pump of a run measures the 0.15s head start start() builds
+         in, not starvation — sampling it would peg the minimum there forever */
+      if (pumps++) least("slackMin", slack);
+      const t = performance.now();
+      if (lastPump) worst("pumpMax", t - lastPump);
+      lastPump = t;
+    }
+    function onFrame(){
+      frames++;
+      const t = performance.now();
+      if (lastFrame){
+        const d = t - lastFrame;
+        worst("frameMax", d);
+        if (d > 50) bump("jank", 1);
+      }
+      lastFrame = t;
+    }
+
+    /* the correlation that makes the rest legible: skips clustered a fixed
+       distance into a phase are a scheduling artefact, skips scattered
+       uniformly are underruns */
+    function mark(){
+      const w = win, it = curItem, now = clock();
+      const where = it
+        ? `${it.key} +${Math.min(Math.max(now-it.t0,0), it.dur).toFixed(2)}/${fmt(it.dur)}s`
+        : "idle";
+      marks.push(
+        `+${(now-audioT0).toFixed(1)}s ${where} · slack ` +
+        (w.slackMin===Infinity ? "—" : w.slackMin.toFixed(2)) +
+        ` pump ${ms(w.pumpMax)} frame ${ms(w.frameMax)} jank ${w.jank}` +
+        ` glitch ${w.glitch}/${w.glitchMs.toFixed(1)}ms drift ${drift().toFixed(3)}s`);
+      win = zero();
+      render();
+    }
+
+    function lines(){
+      const l = life, out = [];
+      out.push(actx
+        ? `state ${actx.state} · ${actx.sampleRate}Hz · base ${(actx.baseLatency*1000||0).toFixed(1)}ms`
+          + ` · out ${((actx.outputLatency||0)*1000).toFixed(1)}ms · probe ${probe}`
+        : "audio not started — tap Begin");
+      out.push(`run ${(clock()-audioT0).toFixed(0)}s · pumps ${pumps} · frames ${frames} · marks ${marks.length}`);
+      out.push(`slack min ${l.slackMin===Infinity?"—":l.slackMin.toFixed(2)+"s"}  (lookahead ${LOOKAHEAD}s)`);
+      out.push(`pump gap max ${ms(l.pumpMax)}  (interval ${SCHED_MS}ms)`);
+      out.push(`frame max ${ms(l.frameMax)} · jank>50ms ${l.jank}`);
+      out.push(`glitch ${l.glitch} · worst ${l.glitchMs.toFixed(1)}ms · drift ${drift().toFixed(3)}s`);
+      if (cap) out.push(`rendercap avg ${(cap.avg*100).toFixed(0)}% · peak ${(cap.peak*100).toFixed(0)}%`
+                        + ` · underrun ${(cap.under*100).toFixed(2)}%`);
+      out.push(`states ${states.join(" ")}`);
+      return out;
+    }
+
+    function render(){
+      if (!on) return;
+      $("dbgOut").textContent = lines().join("\n");
+      $("dbgLog").textContent = marks.length
+        ? marks.slice(-14).join("\n")
+        : "no marks yet — tap the button the moment you hear a skip";
+    }
+
+    function report(){
+      return [
+        `cadence ${$("ver").textContent} · ${new Date().toISOString().slice(0,19)}Z`,
+        `ua ${navigator.userAgent}`,
+        `screen ${innerWidth}x${innerHeight}@${devicePixelRatio} · pattern ${pattern.join("-")} · running ${running}`,
+        ...lines(),
+        `marks:`,
+        ...(marks.length ? marks.map(m => "  " + m) : ["  (none)"])
+      ].join("\n");
+    }
+
+    function open(v){
+      on = v;
+      $("dbg").classList.toggle("open", v);
+      $("dbgTA").classList.remove("show");
+      clearInterval(uiTimer);
+      if (v){ render(); uiTimer = setInterval(render, 250); }
+    }
+
+    return {
+      attach, reset, onPump, onFrame, mark, report, render,
+      open, toggle: () => open(!on), isOpen: () => on,
+      hold: () => hold, setHold: v => { hold = v; }
+    };
+  })();
+
   /* ---------------- audio ----------------
      Every ramp is scheduled on the AudioContext clock at an absolute time that
      is still ~a second in the future, from a timer that does not depend on rAF.
@@ -571,6 +809,7 @@
        Nothing here needs low latency, and that headroom is what keeps a busy
        frame from underrunning the output. */
     try { ctx = new AC({latencyHint:"playback"}); } catch(e){ ctx = new AC(); }
+    DBG.attach(ctx);
 
     outGain = ctx.createGain(); outGain.gain.value = vol();
     outGain.connect(ctx.destination);
@@ -772,6 +1011,7 @@
   function pump(){
     if (!running || !ctx) return;
     const horizon = ctx.currentTime + LOOKAHEAD;
+    DBG.onPump(schedT - ctx.currentTime);
     let guard = 64;
     while (schedT < horizon && guard-- > 0) pushPhase();
     while (timeline.length > 1 && timeline[1].t0 <= ctx.currentTime) timeline.shift();
@@ -781,6 +1021,7 @@
   function frame(){
     if (!running) return;
     rafId = requestAnimationFrame(frame);
+    DBG.onFrame();
     const it0 = timeline[0];
     if (!it0) return;
 
@@ -825,6 +1066,7 @@
     cancelAt(master.gain, ctx.currentTime);
     master.gain.linearRampToValueAtTime(0, t0);
     resetLevels();
+    DBG.reset();
 
     timeline = []; curItem = null;
     schedI = 0; schedCycle = 0; schedT = t0;
@@ -1036,7 +1278,50 @@
     nudge();
   });
   ["pointermove","pointerdown","touchstart"].forEach(ev => addEventListener(ev, nudge, {passive:true}));
-  addEventListener("visibilitychange", () => { if (document.hidden && running) stop(); });
+  /* holding through a hide is how the lock-screen/dimming case gets tested;
+     otherwise stopping on hide is still the right default */
+  addEventListener("visibilitychange", () => {
+    if (document.hidden && running && !DBG.hold()) stop();
+  });
+
+  /* ---------------- diagnostics panel ---------------- */
+  {
+    const ver = $("ver");
+    ver.setAttribute("role","button");
+    ver.setAttribute("tabindex","0");
+    ver.title = "Diagnostics";
+    ver.onclick = () => DBG.toggle();
+    /* stopPropagation, or Space also reaches the window handler and toggles
+       the session out from under the panel */
+    ver.onkeydown = e => {
+      if (e.key === "Enter" || e.key === " "){
+        e.preventDefault(); e.stopPropagation(); DBG.toggle();
+      }
+    };
+
+    $("dbgMark").onclick  = () => DBG.mark();
+    $("dbgReset").onclick = () => DBG.reset();
+    $("dbgClose").onclick = () => DBG.open(false);
+    $("dbgHold").onclick  = e => {
+      const v = e.currentTarget.getAttribute("aria-pressed") !== "true";
+      e.currentTarget.setAttribute("aria-pressed", v);
+      DBG.setHold(v);
+    };
+    $("dbgCopy").onclick = () => {
+      const txt = DBG.report(), ta = $("dbgTA");
+      const fallback = () => { ta.value = txt; ta.classList.add("show"); ta.select(); };
+      if (navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(txt).then(() => {
+          ta.classList.remove("show");
+          const b = $("dbgCopy"), was = b.textContent;
+          b.textContent = "Copied";
+          setTimeout(() => { b.textContent = was; }, 1200);
+        }).catch(fallback);
+      else fallback();
+    };
+
+    if (/[?&#]debug/.test(location.search + location.hash)) DBG.open(true);
+  }
 
   buildPhases(); drawDial(); idle();
 })();
